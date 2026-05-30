@@ -4,7 +4,6 @@ Zerodha Kite Connect - Historical Data
 
 """
 import os
-from broker_platform import *
 from datatypes.login_types import *
 
 #defines
@@ -77,6 +76,8 @@ class utility_manager:
         return globals()[f"broker_utility_data{broker_data.user_id}"]
 
     def get_fyers_utility_object(self, user_name="", client_id="", secret_id="", pin="", totp="", phone_no="", refresh_token=""):
+        from broker_platform.fyers.fyers_utility import fyers_utitlity
+
         globals()[f"obj_trade_utility{user_name}"] = fyers_utitlity(user_name=user_name,
                                                                     client_id=client_id,
                                                                     secret_id=secret_id,
@@ -86,6 +87,8 @@ class utility_manager:
                                                                     refresh_token=refresh_token)
 
     def get_kite_utility_object(self, user_name="", client_id="", secret_id="", pin="", totp="", phone_no="", refresh_token = ""):
+        from broker_platform.kite.kite_utility import kite_utitlity
+
         globals()[f"obj_trade_utility{user_name}"] = kite_utitlity(user_name=user_name,
                                                                    client_id=client_id,
                                                                    secret_id=secret_id,
@@ -94,6 +97,8 @@ class utility_manager:
                                                                    phone_no=phone_no)
 
     def get_zebu_utility_object(self, user_name="", client_id="", secret_id="", pin="", totp="", phone_no="", refresh_token = ""):
+        from broker_platform.zebu.zebumynt_utility import zebumynt_utitlity
+
         globals()[f"obj_trade_utility{user_name}"] = zebumynt_utitlity(user_name=user_name,
                                                                    client_id=client_id,
                                                                    secret_id=secret_id,

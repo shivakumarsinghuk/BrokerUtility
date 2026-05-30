@@ -2,4 +2,8 @@
 """
 # broker_platform/zebu/__init__.py
 """
-from .zebumynt_utility import *
+try:
+    from .zebumynt_utility import *
+except ImportError:
+    pass
+from .ai_trading_market_data import *
