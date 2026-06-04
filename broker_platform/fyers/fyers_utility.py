@@ -5,6 +5,8 @@ Fyers utility
 
 #from fyers_apiv3 import accessToken
 from fyers_apiv3 import fyersModel
+import os
+import requests
 import traceback
 #from utility import *
 import pyotp
@@ -24,7 +26,7 @@ FYERS_API_RETRY_TIME = 1
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
 
 class fyers_utitlity:
-    def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token=""):
+    def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token="", access_token=""):
         #generate trading session
         try:
             self.is_running = False
@@ -39,9 +41,14 @@ class fyers_utitlity:
             self.response_type = "code"
             self.state = "sample_state"
             self.refresh_token = refresh_token
-            #self.access_token = self.__get_access_token_by_refresh_token()
-            self.access_token = self.__getAccessToken()
+            if access_token:
+                self.access_token = access_token
+            elif self.refresh_token:
+                self.access_token = self.__get_access_token_by_refresh_token()
+            else:
+                self.access_token = self.__getAccessToken()
             self.fyers = fyersModel.FyersModel(client_id=self.app_id, token=self.access_token,log_path=self.logs_path)
+            self.is_running = True
             time.sleep(5)
         except:
             print("Exception in fyers utility constructor")
@@ -535,10 +542,18 @@ class fyers_utitlity:
                     response = self.fyers.quotes(data=dict_request)
                     if response['s'] == 'ok':
                         for item in response['d']:
-                            obj_quote_data = quote_data(item['v']['ask'], item['v']['open_price'], item['v']['high_price'],\
-                                                        item['v']['low_price'], item['v']['prev_close_price'], \
-                                                        item['v']['lp'], item['v']['volume'])
+                            value = item.get('v', {})
+                            obj_quote_data = quote_data(value.get('ask', 0.0), value.get('open_price', 0.0),
+                                                        value.get('high_price', 0.0), value.get('low_price', 0.0),
+                                                        value.get('prev_close_price', 0.0), value.get('lp', 0.0),
+                                                        value.get('volume', 0.0), value.get('bid', 0.0),
+                                                        value.get('ch', 0.0), value.get('chp', 0.0),
+                                                        value.get('spread', 0.0),
+                                                        value.get('atp', value.get('vwap', 0.0)),
+                                                        value.get('tt', 0), value.get('symbol', item.get('n', '')),
+                                                        value)
 
+                            dict_quote_data[q_data.symbol] = obj_quote_data
                             dict_quote_data[item['n'].replace("NSE:", "")] = obj_quote_data
                         break
                     else:
@@ -546,7 +561,7 @@ class fyers_utitlity:
                         time.sleep(FYERS_API_RETRY_TIME)
 
                 except:
-                    print("Exception while getting quotes", response, amo)
+                    print("Exception while getting quotes", response)
                     retry_number = retry_number + 1
                     time.sleep(FYERS_API_RETRY_TIME)
         return dict_quote_data

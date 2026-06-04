@@ -1,6 +1,6 @@
 # BrokerUtility
 
-BrokerUtility is a broker abstraction repository used by AI-Trading as a Git submodule. It contains utility classes for Zebu/Mynt, Zerodha Kite, and Fyers. For the AI-Trading integration, only the read-only Zebu market-data path is used.
+BrokerUtility is a broker abstraction repository used by AI-Trading as a Git submodule. It contains utility classes for FYERS, Zebu/Mynt, and Zerodha Kite. For the AI-Trading integration, the read-only FYERS market-data path is now the primary path.
 
 ## Repository Layout
 
@@ -14,6 +14,7 @@ BrokerUtility/
 │   ├── fyers/
 │   │   ├── __init__.py
 │   │   ├── .gitkeep
+│   │   ├── ai_trading_market_data.py
 │   │   └── fyers_utility.py
 │   ├── kite/
 │   │   ├── __init__.py
@@ -37,99 +38,97 @@ BrokerUtility/
 └── testing/
     ├── .gitkeep
     ├── test.py
-    └── test_ai_trading_market_data.py
+    ├── test_ai_trading_market_data.py
+    └── test_fyers_ai_trading_market_data.py
 ```
 
 ## File-By-File Analysis
 
-### `broker_platform/zebu/zebumynt_utility.py`
+### `broker_platform/fyers/fyers_utility.py`
 
-Primary Zebu/Mynt broker utility.
+Primary FYERS broker utility.
 
 What it does:
 
-- Imports `myntapi.app` and creates a Zebu/Mynt API session.
-- Logs in with user id, password, two-factor value, vendor code, API secret, and IMEI/phone identifier.
-- Stores known index tokens for `NIFTYBANK-INDEX`, `NIFTY50-INDEX`, and `INDIAVIX-INDEX`.
-- Fetches historical or intraday OHLC data through:
-  - `get_time_price_series()` for minute intervals.
-  - `get_daily_price_series()` for daily intervals.
-- Normalizes Mynt OHLC fields into common column names from `datatypes/defines.py`.
-- Adds candle color classification through `candle_type`.
-- Fetches quote snapshots through `get_quotes()`.
-- Converts quote snapshots into `quote_data` objects through `__extract_quote_data()`.
-- Contains order APIs for place, modify, cancel, order book, and single-order history.
-- Contains helper functions for exchange/token selection and option symbol formatting.
+- Imports `fyers_apiv3.fyersModel`.
+- Builds a FYERS access token through either an existing access token, a refresh token, or the manual authorization-code flow.
+- Creates a `FyersModel` client.
+- Fetches historical candles through `fyers.history()`.
+- Fetches quotes through `fyers.quotes()`.
+- Fetches option-chain data through `fyers.optionchain()`.
+- Contains order APIs for place, modify, cancel, order book, and order status.
+- Converts FYERS quote responses into the shared `quote_data` type.
 
 Important market-data methods:
 
 - `fetchOHLC(ticker, str_from_date, str_to_date, interval, all_data=False, exchange="NSE", market_type="EQ")`
 - `fetchCandleMultipleStocks(lst_stocks, str_from_date, str_to_date, interval, ...)`
-- `get_quote(p_get_quote_req, p_exchange="NSE")`
-- `get_quotes(p_lst_get_quote_data_req, p_exchange="NSE")`
-- `getTimeFrame(...)`
-- `getTimeFrameMultiDays(...)`
+- `get_quotes(p_lst_stocks)`
+- `getOptionChain(symbol, exchange="NSE")`
 
-Zebu API request/response shape:
-
-- Minute candles call:
+FYERS History request shape:
 
 ```python
-self.zebumynt.get_time_price_series(
-    exchange="NSE",
-    token="RPOWER-EQ",
-    starttime="epoch_seconds",
-    endtime="epoch_seconds",
-    interval=1,
-)
+fyers.history({
+    "symbol": "NSE:RPOWER-EQ",
+    "resolution": "1",
+    "date_format": "1",
+    "range_from": "YYYY-MM-DD",
+    "range_to": "YYYY-MM-DD",
+    "cont_flag": "1",
+})
 ```
 
-- Mynt minute candle fields are renamed as:
+FYERS History response is converted into:
 
 ```text
-time    -> date
-into    -> open
-inth    -> high
-intl    -> low
-intc    -> close
-intv    -> volume
-intvwap -> vwap
+date, open, high, low, close, volume
 ```
 
-- Quote call:
+FYERS Quotes request shape:
 
 ```python
-self.zebumynt.get_quotes(exchange="NSE", token="RPOWER-EQ")
+fyers.quotes({
+    "symbols": "NSE:RPOWER-EQ"
+})
 ```
 
-- Quote fields are converted approximately as:
+Quote fields captured when present:
 
 ```text
-o  -> open
-h  -> high
-l  -> low
-c  -> previous close
-lp -> last traded price
-v  -> volume
+lp                -> ltp
+open_price        -> open
+high_price        -> high
+low_price         -> low
+prev_close_price  -> previous close
+volume            -> volume
+bid               -> bid
+ask               -> ask
+ch                -> change
+chp               -> change percent
+spread            -> spread
+atp/vwap          -> average traded price
+tt                -> last trade time
 ```
 
-### `broker_platform/zebu/ai_trading_market_data.py`
+### `broker_platform/fyers/ai_trading_market_data.py`
 
-AI-Trading adapter added for this integration.
+AI-Trading FYERS adapter.
 
 What it does:
 
-- Keeps AI-Trading independent from raw Zebu/Mynt field names.
-- Creates `zebumynt_utitlity` lazily when a real utility object is not injected.
-- Converts Zebu OHLC DataFrames into AI-Trading candle dictionaries.
-- Converts Zebu quote objects into metadata keys compatible with the existing AI-Trading flow.
-- Provides `market_epoch_range()` to produce IST epoch seconds for Zebu's time-price API.
+- Keeps AI-Trading independent from raw FYERS field names.
+- Creates `fyers_utitlity` when a real utility object is not injected.
+- Converts FYERS History candles into AI-Trading candle dictionaries.
+- Calculates VWAP locally from OHLCV because the History API returns OHLCV candles, not every derived indicator.
+- Converts FYERS Quotes snapshots into metadata keys compatible with AI-Trading.
+- Appends the latest quote as a live candle when quote LTP is fresher than the last completed candle.
 
 AI-Trading candle format produced:
 
 ```python
 {
-    "timestamp": "2026-05-30 09:15:00",
+    "timestamp": "2026-06-04 09:15:00",
     "price": 101.0,
     "open": 100.0,
     "high": 102.0,
@@ -149,38 +148,35 @@ AI-Trading metadata format produced:
     "regularMarketVolume": 12000.0,
     "previousClose": 98.5,
     "regularMarketOpen": 100.0,
+    "bid": 103.95,
+    "ask": 104.05,
+    "spread": 0.10,
+    "change": 5.5,
+    "changePercent": 5.58,
+    "averageTradedPrice": 102.5,
+    "lastTradeTime": 1780557300,
 }
 ```
+
+### `broker_platform/fyers/__init__.py`
+
+Exports the FYERS utility and AI-Trading market-data adapter. The utility import is guarded so adapter tests can run without `fyers-apiv3` installed.
+
+### `broker_platform/zebu/zebumynt_utility.py`
+
+Zebu/Mynt broker utility.
+
+It can log in to Mynt, fetch time-price-series candles, fetch quotes, and call order APIs. AI-Trading no longer uses this path, but it remains available for other submodule consumers.
+
+### `broker_platform/zebu/ai_trading_market_data.py`
+
+Legacy AI-Trading Zebu adapter. It remains in the submodule for compatibility, but AI-Trading now uses the FYERS adapter.
 
 ### `broker_platform/kite/kite_utility.py`
 
 Zerodha Kite utility.
 
-What it does:
-
-- Logs in using Kite Connect, Selenium, and TOTP.
-- Downloads NSE instruments.
-- Fetches historical candles through Kite's `historical_data()`.
-- Fetches quotes through Kite's `quote()`.
-- Places, modifies, and cancels orders.
-- Converts Kite response objects into local `order_data`, `order_info`, and `quote_data` types.
-
-AI-Trading no longer uses this connector directly. It remains in BrokerUtility for other consumers of the submodule.
-
-### `broker_platform/fyers/fyers_utility.py`
-
-Fyers utility.
-
-What it does:
-
-- Generates Fyers access tokens.
-- Fetches historical candles through `fyers.history()`.
-- Fetches quotes through `fyers.quotes()`.
-- Places, modifies, and cancels orders.
-- Fetches option-chain data.
-- Converts Fyers response fields into common local data classes.
-
-AI-Trading does not use this connector.
+It logs in through Kite Connect, fetches historical candles and quotes, and contains order APIs. AI-Trading does not use this connector.
 
 ### `broker_platform/__init__.py`
 
@@ -188,42 +184,19 @@ Package marker for broker platform modules.
 
 ### `broker_platform/zebu/__init__.py`
 
-Exports the Zebu utility and AI-Trading market-data adapter.
+Exports the Zebu utility and legacy Zebu AI-Trading adapter.
 
 ### `broker_platform/kite/__init__.py`
 
 Exports the Kite utility.
 
-### `broker_platform/fyers/__init__.py`
-
-Exports the Fyers utility.
-
 ### `datatypes/defines.py`
 
-Shared constants used by broker utilities.
-
-Includes:
-
-- Time and OHLC column names.
-- Indicator column names.
-- Success/failure labels.
-- Order status labels.
-- Symbol type labels.
-- Lot-size constants.
+Shared constants used by broker utilities, including OHLC column names, indicator names, success/failure labels, order status labels, symbol type labels, and lot-size constants.
 
 ### `datatypes/login_types.py`
 
 Defines `LogInData`, a simple credential container used by `pal/utility_manager.py`.
-
-Fields:
-
-- `broker`
-- `user_id`
-- `password`
-- `api_key`
-- `api_secret_key`
-- `phone_no`
-- `totp_key`
 
 ### `datatypes/trade_data.py`
 
@@ -246,7 +219,7 @@ Important classes:
 - `greek_data`
 - `option_chain_data`
 
-For AI-Trading, `quote_data` and `get_quote_request_data` are the important classes because they carry Zebu quote responses into a stable internal shape.
+For AI-Trading, `quote_data` and `get_quote_request_data` are the important classes because they carry FYERS quote responses into a stable internal shape.
 
 ### `datatypes/__init__.py`
 
@@ -263,7 +236,7 @@ What it does:
 - Creates and caches a utility object for each user id.
 - Supports `fyers`, `zerodha`, and `zebumynt`.
 
-The broker-specific imports are lazy so using Zebu does not require Kite or Fyers dependencies to be installed.
+Broker-specific imports are lazy so one broker path does not require every broker dependency to be installed.
 
 ### `pal/__init__.py`
 
@@ -273,9 +246,13 @@ Exports `utility_manager`.
 
 Manual example script showing how to create `LogInData` for Zebu, Fyers, and Zerodha.
 
+### `testing/test_fyers_ai_trading_market_data.py`
+
+Unit test for the AI-Trading FYERS adapter using fake utility responses.
+
 ### `testing/test_ai_trading_market_data.py`
 
-Unit test for the AI-Trading Zebu adapter using fake utility responses.
+Legacy unit test for the AI-Trading Zebu adapter using fake utility responses.
 
 ### `.gitkeep` Files
 
@@ -285,30 +262,31 @@ Placeholder files that keep otherwise empty directories in version control.
 
 Ignores generated Python cache files such as `__pycache__/` and `*.pyc`.
 
-## Is Zebu An Alternative Market Data Source?
+## Is FYERS An Alternative Market Data Source?
 
-Yes. The Zebu/Mynt utility provides an authenticated alternative to Yahoo Finance and Kite Connect for market data.
+Yes. FYERS is now the primary source for AI-Trading market data.
 
-It is not currently implemented as a streaming WebSocket in this repository. Instead, it provides:
+It provides:
 
-- Intraday OHLC candles through Mynt time-price-series APIs.
-- Daily candles through Mynt daily-price-series APIs.
-- Live quote snapshots through Mynt quote APIs.
+- Historical/intraday OHLCV candles through the History API.
+- Real-time quote snapshots through the Quotes API.
+- Market depth and option-chain endpoints in the broader FYERS API surface, though AI-Trading currently uses only History and Quotes.
 
 AI-Trading uses it as a polling feed:
 
-1. Poll Zebu at the configured interval.
-2. Fetch today's 1-minute candles.
+1. Poll FYERS at the configured interval.
+2. Fetch today's 1-minute OHLCV candles.
 3. Fetch the latest quote snapshot.
-4. Convert both into AI-Trading's common candle and metadata format.
-5. Pass the normalized data into the existing signal and Claude analysis pipeline.
+4. Calculate missing analytics such as VWAP from OHLCV.
+5. Convert both sources into AI-Trading's common candle and metadata format.
+6. Pass normalized data into the existing signal and Claude analysis pipeline.
 
 ## Running The Adapter Tests
 
 From inside this submodule:
 
 ```bash
-python3 -m unittest testing.test_ai_trading_market_data
+python3 -m unittest testing.test_fyers_ai_trading_market_data
 ```
 
-The test uses fake utility objects and does not log in to Zebu.
+The test uses fake utility objects and does not log in to FYERS.

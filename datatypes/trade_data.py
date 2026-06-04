@@ -71,21 +71,40 @@ class exit_data:
 @dataclass
 class quote_data():
     ask: float = 0.0
+    bid: float = 0.0
     open: float = 0.0
     high: float = 0.0
     low: float = 0.0
     prev_close: float = 0.0
     ltp: float = 0.0
     volume: int = 0
+    change: float = 0.0
+    change_percent: float = 0.0
+    spread: float = 0.0
+    avg_trade_price: float = 0.0
+    last_trade_time: int = 0
+    symbol: str = ""
+    raw: dict = field(default_factory=dict)
 
-    def __init__(self, p_ask=0.0, p_open=0.0, p_high=0.0, p_low=0.0, p_prev_close=0.0, p_ltp=0.0, p_volume=0.0):
+    def __init__(self, p_ask=0.0, p_open=0.0, p_high=0.0, p_low=0.0, p_prev_close=0.0,
+                 p_ltp=0.0, p_volume=0.0, p_bid=0.0, p_change=0.0, p_change_percent=0.0,
+                 p_spread=0.0, p_avg_trade_price=0.0, p_last_trade_time=0, p_symbol="",
+                 p_raw=None):
         self.ask = p_ask
+        self.bid = p_bid
         self.open = p_open
         self.high = p_high
         self.low = p_low
         self.prev_close = p_prev_close
         self.ltp = p_ltp
         self.volume = p_volume
+        self.change = p_change
+        self.change_percent = p_change_percent
+        self.spread = p_spread
+        self.avg_trade_price = p_avg_trade_price
+        self.last_trade_time = p_last_trade_time
+        self.symbol = p_symbol
+        self.raw = p_raw or {}
 
 @dataclass
 class trade_details():
