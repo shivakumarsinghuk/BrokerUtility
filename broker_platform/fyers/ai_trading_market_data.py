@@ -82,12 +82,15 @@ class FyersMarketDataAdapter:
         )
         candles = self._frame_to_candles(frame)
         self._attach_vwap(candles)
+        history_candle_count = len(candles)
         meta = self._meta_from_candles(candles)
+        meta["historyCandles"] = history_candle_count
 
         if include_quote:
             quote_meta = self.fetch_quote_meta(symbol, market_type=market_type)
             meta.update({key: value for key, value in quote_meta.items() if value is not None})
             self._append_quote_candle(candles, meta)
+        meta["candlesReturned"] = len(candles)
 
         return candles, meta
 

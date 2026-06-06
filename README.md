@@ -58,6 +58,10 @@ That file is loaded by `config/settings.py`, and the resolved values are passed
 into BrokerUtility at runtime. Keep real app secrets, TOTP keys, PINs, access
 tokens, and refresh tokens outside version control.
 
+AI-Trading may pass either a base symbol such as `RPOWER` or a full FYERS symbol
+such as `NSE:RPOWER-EQ`. The FYERS utility normalizes both shapes before calling
+FYERS APIs.
+
 ## File-By-File Analysis
 
 ### `broker_platform/fyers/fyers_utility.py`
@@ -74,6 +78,8 @@ What it does:
 - Fetches option-chain data through `fyers.optionchain()`.
 - Contains order APIs for place, modify, cancel, order book, and order status.
 - Converts FYERS quote responses into the shared `quote_data` type.
+- Accepts full symbols such as `NSE:RPOWER-EQ` without double-prefixing or
+  double-appending `-EQ`.
 
 Important market-data methods:
 
@@ -139,6 +145,8 @@ What it does:
 - Calculates VWAP locally from OHLCV because the History API returns OHLCV candles, not every derived indicator.
 - Converts FYERS Quotes snapshots into metadata keys compatible with AI-Trading.
 - Appends the latest quote as a live candle when quote LTP is fresher than the last completed candle.
+- Adds `historyCandles` and `candlesReturned` metadata so callers can detect
+  quote-only fallbacks separately from true historical candle results.
 
 AI-Trading candle format produced:
 

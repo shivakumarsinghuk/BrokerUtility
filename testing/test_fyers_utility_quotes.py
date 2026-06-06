@@ -49,6 +49,16 @@ class FyersUtilityQuotesTest(unittest.TestCase):
         self.assertEqual(quote.avg_trade_price, 28.13)
         self.assertEqual(quote.raw["symbol"], "NSE:RPOWER-EQ")
 
+    def test_get_quotes_accepts_full_fyers_symbol(self):
+        utility = object.__new__(fyers_utitlity)
+        utility.fyers = FakeFyersClient()
+
+        quotes = utility.get_quotes([get_quote_request_data("NSE:RPOWER-EQ", "EQ")])
+
+        self.assertIn("NSE:RPOWER-EQ", quotes)
+        self.assertIn("RPOWER", quotes)
+        self.assertEqual(quotes["NSE:RPOWER-EQ"].ltp, 28.59)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,7 @@ import webbrowser
 import hashlib
 import time
 from datatypes.defines import *
-from datatypes.trade_data import quote_data
+from datatypes.trade_data import get_quote_request_data, quote_data
 import datetime as dt
 
 #Define
@@ -162,6 +162,23 @@ class fyers_utitlity:
             candle_type = "GREEN"
 
         return candle_type
+
+    def __format_fyers_symbol(self, symbol, exchange="NSE", market_type="EQ"):
+        """Return FYERS v3 symbol format, accepting either base or full symbols."""
+        formatted = symbol if ":" in symbol else f"{exchange}:{symbol}"
+        if market_type and not formatted.endswith(f"-{market_type}"):
+            formatted = f"{formatted}-{market_type}"
+        if not market_type and (formatted.endswith("CE-INDEX") or formatted.endswith("PE-INDEX")):
+            formatted = formatted.replace("-INDEX", "")
+        return formatted
+
+    def __quote_key_aliases(self, full_symbol, request_symbol, market_type):
+        aliases = {full_symbol, request_symbol}
+        base = full_symbol.split(":", 1)[-1]
+        aliases.add(base)
+        if market_type and base.endswith(f"-{market_type}"):
+            aliases.add(base[: -(len(market_type) + 1)])
+        return aliases
     # --------------PRIVATE METHODS END----------------------------------------
 
     #p_option_type - CE or PE
@@ -223,16 +240,9 @@ class fyers_utitlity:
     def fetchOHLC(self, ticker, str_from_date, str_to_date, interval, all_data=False, exchange="NSE", market_type="EQ"):
         """extracts historical data and outputs in the form of dataframe"""
 
-        #modifying ticker
-        ticker = exchange + ":" + ticker
-        if ticker == "NIFTY50":
-            ticker = "NIFTY"
-        if not market_type == "":
-            #for options market is not required
-            ticker = ticker + "-" + market_type
-        else:
-            if ticker.endswith("CE-INDEX") or ticker.endswith("PE-INDEX"):
-                ticker = ticker.replace("-INDEX", "")
+        # FYERS expects NSE equity symbols in the form NSE:SYMBOL-EQ.
+        ticker = "NIFTY" if ticker == "NIFTY50" else ticker
+        ticker = self.__format_fyers_symbol(ticker, exchange=exchange, market_type=market_type)
 
 
         #modify the interval
@@ -543,15 +553,15 @@ class fyers_utitlity:
         #minimum one stock should be availaible
 
         if len(p_lst_stocks) > 0:
+            request_by_full_symbol = {}
             for q_data in p_lst_stocks:
                 #print("quote_data: ", q_data)
+                full_symbol = self.__format_fyers_symbol(q_data.symbol, market_type=q_data.market_type)
+                request_by_full_symbol[full_symbol] = q_data
                 if data == "":
-                    data = data + "NSE:" + q_data.symbol
+                    data = data + full_symbol
                 else:
-                    data = data + "," + "NSE:" + q_data.symbol
-
-                if not q_data.market_type == "":
-                    data = data + "-" + q_data.market_type
+                    data = data + "," + full_symbol
 
             dict_request = {
                 "symbols": data
@@ -562,6 +572,8 @@ class fyers_utitlity:
                     if response.get('s') == 'ok':
                         for item in response['d']:
                             value = item.get('v', {})
+                            returned_symbol = item.get('n', value.get('symbol', ''))
+                            request_data = request_by_full_symbol.get(returned_symbol, get_quote_request_data(returned_symbol.replace("NSE:", ""), ""))
                             obj_quote_data = quote_data(value.get('ask', 0.0), value.get('open_price', 0.0),
                                                         value.get('high_price', 0.0), value.get('low_price', 0.0),
                                                         value.get('prev_close_price', 0.0), value.get('lp', 0.0),
@@ -569,11 +581,11 @@ class fyers_utitlity:
                                                         value.get('ch', 0.0), value.get('chp', 0.0),
                                                         value.get('spread', 0.0),
                                                         value.get('atp', value.get('vwap', 0.0)),
-                                                        value.get('tt', 0), value.get('symbol', item.get('n', '')),
+                                                        value.get('tt', 0), value.get('symbol', returned_symbol),
                                                         value)
 
-                            dict_quote_data[q_data.symbol] = obj_quote_data
-                            dict_quote_data[item['n'].replace("NSE:", "")] = obj_quote_data
+                            for key in self.__quote_key_aliases(returned_symbol, request_data.symbol, request_data.market_type):
+                                dict_quote_data[key] = obj_quote_data
                         break
                     else:
                         print("FYERS quotes error: ", response.get("code"), response.get("message"))
