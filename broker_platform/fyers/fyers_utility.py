@@ -5,19 +5,21 @@ Fyers utility
 
 #from fyers_apiv3 import accessToken
 from fyers_apiv3 import fyersModel
+import base64
+import json
 import os
+import pandas as pd
 import requests
 import traceback
 #from utility import *
 import pyotp
 from datetime import *
 import calendar
-from selenium import webdriver
-from selenium.webdriver.common.by import By
 import webbrowser
 import hashlib
 import time
 from datatypes.defines import *
+from datatypes.trade_data import quote_data
 import datetime as dt
 
 #Define
@@ -31,6 +33,7 @@ class fyers_utitlity:
         try:
             self.is_running = False
             self.logs_path = os.getcwd() + "/Logs/"
+            os.makedirs(self.logs_path, exist_ok=True)
             self.user_name = user_name
             self.app_id = client_id
             self.secret_id = secret_id
@@ -41,41 +44,53 @@ class fyers_utitlity:
             self.response_type = "code"
             self.state = "sample_state"
             self.refresh_token = refresh_token
-            if access_token:
+            access_token_expired = self.__is_token_expired(access_token) if access_token else False
+            if access_token and not access_token_expired:
                 self.access_token = access_token
             elif self.refresh_token:
+                if access_token_expired:
+                    print("FYERS access token is expired; attempting refresh-token authentication.")
                 self.access_token = self.__get_access_token_by_refresh_token()
+            elif access_token_expired:
+                raise RuntimeError("FYERS access token is expired and no refresh token is configured.")
             else:
                 self.access_token = self.__getAccessToken()
             self.fyers = fyersModel.FyersModel(client_id=self.app_id, token=self.access_token,log_path=self.logs_path)
             self.is_running = True
             time.sleep(5)
-        except:
-            print("Exception in fyers utility constructor")
+        except Exception as exc:
+            print(f"Exception in fyers utility constructor: {exc}")
+            raise
 
     def get_running_status(self):
         return self.is_running
 
+    def __is_token_expired(self, token):
+        try:
+            payload_part = token.split(".")[1]
+            payload_part += "=" * (-len(payload_part) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_part))
+            expires_at = dt.datetime.fromtimestamp(int(payload["exp"]), dt.timezone.utc)
+            return expires_at <= dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1)
+        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
     def __get_access_token_by_refresh_token(self):
         hash_val = hashlib.sha256(f"{self.app_id}:{self.secret_id}".encode())
-        access_token = ""
         data = {
             "grant_type": "refresh_token",
             "appIdHash": hash_val.hexdigest(),
             "refresh_token": self.refresh_token,
             "pin": self.pin
         }
-        response = requests.post(
-            'https://api-t1.fyers.in/api/v3/validate-refresh-token', headers="", json=data
-        )
+        response = requests.post('https://api-t1.fyers.in/api/v3/validate-refresh-token', json=data, timeout=15)
         response = response.json()
-        print("response: ", response)
-        if response['s'] == 'ok':
-            access_token = response['access_token']
+        if response.get('s') == 'ok':
             self.is_running = True
-        else:
-            print("Execute fyers generate token python script")
-        return access_token
+            return response['access_token']
+        message = response.get("message", "refresh token validation failed")
+        code = response.get("code", "unknown")
+        raise RuntimeError(f"FYERS refresh-token authentication failed: {code} - {message}")
 
     def __getAccessToken(self):
         try:
@@ -93,7 +108,7 @@ class fyers_utitlity:
             #print("authUrl: ", authUrl)
             appSession.set_token(authUrl)
             generate_token = appSession.generate_token()
-            print("Generate Token - ", generate_token)
+            print("Generate Token status - ", generate_token.get("s", "unknown"))
             return generate_token['access_token']
         except:
             traceback.print_exc()
@@ -104,6 +119,9 @@ class fyers_utitlity:
         return authUrl.split('auth_code=')[1].split('&state')[0]
 
     def __get_url_token(self, str_url):
+        from selenium import webdriver
+        from selenium.webdriver.common.by import By
+
         driver = webdriver.Chrome()
         driver.get(str_url)
         try:
@@ -237,16 +255,16 @@ class fyers_utitlity:
         str_to_date = str_to_date.split(" ")[0]
 
         retry_number = 1
-        data = []
+        data = pd.DataFrame()
+        response = None
         dict_request = {"symbol": ticker, "resolution": interval, "date_format": "1", "range_from": str_from_date,
                         "range_to": str_to_date, "cont_flag": "1"}
-        print(dict_request)
         while retry_number < FYERS_API_RETRY_COUNT:
             try:
                 response = self.fyers.history(dict_request)
                 #print("Response: ", response)
                 historic_data_col = [DATE_TIME, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, CLOSE_PRICE,VOLUME_DATA]
-                if response['s'] == 'ok':
+                if response.get('s') == 'ok':
                     data = pd.DataFrame.from_dict(response['candles'])
                     data.columns = historic_data_col
                     data[DATE_TIME] = pd.to_datetime(data[DATE_TIME],unit = "s")
@@ -269,7 +287,7 @@ class fyers_utitlity:
                     data[CANDLE_TYPE] = lst_candle_type
                     break
                 else:
-                    print("Error Response: ", dict_request, response)
+                    print("FYERS history error: ", response.get("code"), response.get("message"))
                     time.sleep(2)
                     data = pd.DataFrame()
 
@@ -521,6 +539,7 @@ class fyers_utitlity:
         retry_number = 1
         data = ""
         dict_quote_data = {}
+        response = None
         #minimum one stock should be availaible
 
         if len(p_lst_stocks) > 0:
@@ -540,7 +559,7 @@ class fyers_utitlity:
             while retry_number < FYERS_API_RETRY_COUNT:
                 try:
                     response = self.fyers.quotes(data=dict_request)
-                    if response['s'] == 'ok':
+                    if response.get('s') == 'ok':
                         for item in response['d']:
                             value = item.get('v', {})
                             obj_quote_data = quote_data(value.get('ask', 0.0), value.get('open_price', 0.0),
@@ -557,11 +576,12 @@ class fyers_utitlity:
                             dict_quote_data[item['n'].replace("NSE:", "")] = obj_quote_data
                         break
                     else:
+                        print("FYERS quotes error: ", response.get("code"), response.get("message"))
                         retry_number = retry_number + 1
                         time.sleep(FYERS_API_RETRY_TIME)
 
-                except:
-                    print("Exception while getting quotes", response)
+                except Exception as exc:
+                    print("Exception while getting quotes:", exc)
                     retry_number = retry_number + 1
                     time.sleep(FYERS_API_RETRY_TIME)
         return dict_quote_data

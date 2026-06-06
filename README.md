@@ -39,8 +39,24 @@ BrokerUtility/
     ├── .gitkeep
     ├── test.py
     ├── test_ai_trading_market_data.py
-    └── test_fyers_ai_trading_market_data.py
+    ├── test_fyers_ai_trading_market_data.py
+    └── test_fyers_utility_quotes.py
 ```
+
+## Credential Handling
+
+BrokerUtility does not own or store live credentials for AI-Trading. The caller
+passes credentials into `fyers_utitlity` or `FyersMarketDataAdapter`.
+
+In AI-Trading, credentials are stored in the parent repo's ignored local file:
+
+```text
+config/credentials.json
+```
+
+That file is loaded by `config/settings.py`, and the resolved values are passed
+into BrokerUtility at runtime. Keep real app secrets, TOTP keys, PINs, access
+tokens, and refresh tokens outside version control.
 
 ## File-By-File Analysis
 
@@ -250,6 +266,10 @@ Manual example script showing how to create `LogInData` for Zebu, Fyers, and Zer
 
 Unit test for the AI-Trading FYERS adapter using fake utility responses.
 
+### `testing/test_fyers_utility_quotes.py`
+
+Unit test for FYERS v3 quote payload mapping into the shared `quote_data` type.
+
 ### `testing/test_ai_trading_market_data.py`
 
 Legacy unit test for the AI-Trading Zebu adapter using fake utility responses.
@@ -257,6 +277,17 @@ Legacy unit test for the AI-Trading Zebu adapter using fake utility responses.
 ### `.gitkeep` Files
 
 Placeholder files that keep otherwise empty directories in version control.
+
+## Testing
+
+Run the FYERS-focused automated tests from the BrokerUtility directory:
+
+```bash
+python3 -m unittest testing.test_fyers_ai_trading_market_data testing.test_fyers_utility_quotes
+```
+
+`testing/test.py` is a manual/example script and is not part of the automated
+test command.
 
 ### `.gitignore`
 
@@ -286,7 +317,7 @@ AI-Trading uses it as a polling feed:
 From inside this submodule:
 
 ```bash
-python3 -m unittest testing.test_fyers_ai_trading_market_data
+python3 -m unittest testing.test_fyers_ai_trading_market_data testing.test_fyers_utility_quotes
 ```
 
-The test uses fake utility objects and does not log in to FYERS.
+The tests use fake utility objects and do not log in to FYERS.
