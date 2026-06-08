@@ -47,14 +47,18 @@ class fyers_utitlity:
             access_token_expired = self.__is_token_expired(access_token) if access_token else False
             if access_token and not access_token_expired:
                 self.access_token = access_token
-            elif self.refresh_token:
-                if access_token_expired:
-                    print("FYERS access token is expired; attempting refresh-token authentication.")
-                self.access_token = self.__get_access_token_by_refresh_token()
-            elif access_token_expired:
-                raise RuntimeError("FYERS access token is expired and no refresh token is configured.")
             else:
-                self.access_token = self.__getAccessToken()
+                try:
+                    if access_token_expired:
+                        print("FYERS access token is expired; attempting refresh-token authentication.")
+                    if self.refresh_token:
+                        self.access_token = self.__get_access_token_by_refresh_token()
+                    else:
+                        raise RuntimeError("No refresh token configured.")
+                except Exception as exc:
+                    print("FYERS refresh-token authentication failed:", exc)
+                    print("Falling back to manual auth-code login. Open the FYERS URL and paste the redirect URL/auth-code back here.")
+                    self.access_token = self.__getAccessToken()
             self.fyers = fyersModel.FyersModel(client_id=self.app_id, token=self.access_token,log_path=self.logs_path)
             self.is_running = True
             time.sleep(5)
@@ -100,12 +104,14 @@ class fyers_utitlity:
                                                   response_type="code",
                                                   grant_type="authorization_code")
             tokenURL = appSession.generate_authcode()
-            print("tokenURL: ", tokenURL)
+            print("Open this FYERS auth URL in your browser to generate a fresh access token:")
+            print(tokenURL)
+            try:
+                webbrowser.open(tokenURL)
+            except Exception:
+                pass
             time.sleep(1)
-            # This command is used to open the url in default system brower
-            #authUrl = self.__get_url_token(tokenURL)
             authUrl = self.__get_url_token_manual(tokenURL)
-            #print("authUrl: ", authUrl)
             appSession.set_token(authUrl)
             generate_token = appSession.generate_token()
             print("Generate Token status - ", generate_token.get("s", "unknown"))
@@ -115,8 +121,12 @@ class fyers_utitlity:
 
     def __get_url_token_manual(self, str_url):
         print("Token Url: ", str_url)
-        authUrl = input('Open url and get the URL from redirect URL')
-        return authUrl.split('auth_code=')[1].split('&state')[0]
+        authUrl = input('Paste the full redirect URL (or auth_code) from FYERS here: ').strip()
+        if 'auth_code=' in authUrl:
+            return authUrl.split('auth_code=')[1].split('&state')[0]
+        if 'code=' in authUrl:
+            return authUrl.split('code=')[1].split('&state')[0]
+        return authUrl
 
     def __get_url_token(self, str_url):
         from selenium import webdriver
