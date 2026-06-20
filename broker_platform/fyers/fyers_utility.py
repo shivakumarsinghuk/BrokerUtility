@@ -17,11 +17,61 @@ import hashlib
 import time
 from datatypes.defines import *
 import datetime as dt
+import yaml
+from yaml import SafeLoader
 
 #Define
 FYERS_API_RETRY_COUNT = 5
 FYERS_API_RETRY_TIME = 1
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
+
+
+class fyers_session_model:
+    def __init__(self, config_file):
+
+        #get the config file data
+        self.config_file = config_file
+        with open(self.config_file) as utility_data:
+            self.utility_data = yaml.load(utility_data, Loader=SafeLoader)
+
+        #generate trading session
+        #self.config = config()
+        #self.utility = utitlity()
+        self.logs_path = os.getcwd() + "/Logs/"
+        self.user_name = self.utility_data["user_name"]
+        self.app_id = self.utility_data["client_id"]
+        self.secret_id = self.utility_data["secret_id"]
+        self.pin = str(self.utility_data["pin"])
+        self.totp = self.utility_data["totp"]
+        self.phone_no = self.utility_data["phone_no"]
+
+        totp = pyotp.TOTP(self.totp)
+        print("Use this TOTP for login in Web Browser: ", totp.now())
+
+    def get_tokens(self):
+        try:
+            appSession = fyersModel.SessionModel(client_id=self.app_id,
+                                                  secret_key=self.secret_id,
+                                                  redirect_uri="http://google.com/",
+                                                  response_type="code",
+                                                  grant_type="authorization_code")
+            tokenURL = appSession.generate_authcode()
+            #print("tokenURL: ", tokenURL)
+            # This command is used to open the url in default system brower
+            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            webbrowser.register('chrome', None, webbrowser.BackgroundBrowser(chrome_path))
+            obj_web_browser = webbrowser.get('chrome')
+            obj_web_browser.open_new_tab(tokenURL)
+            authUrl = input('Enter the URL from redirect URL')
+            appSession.set_token(authUrl.split('auth_code=')[1].split('&state')[0])
+            generate_token = appSession.generate_token()
+            self.utility_data['zaccess_token'] = generate_token['access_token']
+            self.utility_data['zrefresh_token'] = generate_token['refresh_token']
+            #print(self.utility_data['zrefresh_token'])
+            with open(self.config_file, 'w') as fp:
+                yaml.dump(self.utility_data, fp)
+        except:
+            traceback.print_exc()
 
 class fyers_utitlity:
     def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token=""):
