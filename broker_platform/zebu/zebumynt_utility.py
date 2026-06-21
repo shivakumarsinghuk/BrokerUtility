@@ -11,8 +11,8 @@ import datetime as dt
 import pandas as pd
 import traceback
 import pyotp
-from datatypes.defines import *
-from datatypes.trade_data import *
+from ...datatypes.defines import *
+from ...datatypes.trade_data import *
 import time
 #import datetime
 from datetime import datetime

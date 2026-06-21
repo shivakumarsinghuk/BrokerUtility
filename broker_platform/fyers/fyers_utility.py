@@ -15,10 +15,11 @@ from selenium.webdriver.common.by import By
 import webbrowser
 import hashlib
 import time
-from datatypes.defines import *
+from ...datatypes.defines import *
 import datetime as dt
 import yaml
 from yaml import SafeLoader
+import pandas as pd
 
 #Define
 FYERS_API_RETRY_COUNT = 5

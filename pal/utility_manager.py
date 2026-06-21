@@ -5,7 +5,10 @@ Zerodha Kite Connect - Historical Data
 """
 import os
 from broker_platform import *
-from datatypes.login_types import *
+from ..broker_platform.kite import *
+from ..broker_platform.kite import *
+from ..broker_platform.fyers import *
+from ..broker_platform.zebu import *
 
 #defines
 

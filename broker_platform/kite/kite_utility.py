@@ -11,13 +11,13 @@ import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 import pandas as pd
-from datatypes.trade_data import *
 import traceback
 from pyotp import TOTP
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from datatypes.defines import *
+from ...datatypes.defines import *
+from ...datatypes.trade_data import *
 import datetime as dt
 
 #defines
