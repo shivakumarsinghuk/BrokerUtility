@@ -4,28 +4,98 @@ Fyers utility
 """
 
 #from fyers_apiv3 import accessToken
-from fyers_apiv3 import fyersModel
-import base64
-import json
+try:
+    from fyers_apiv3 import fyersModel
+except ImportError:
+    class _MissingFyersModel:
+        class FyersModel:
+            def __init__(self, *args, **kwargs):
+                raise ImportError("Install fyers-apiv3 to use live FYERS sessions.")
+
+        class SessionModel:
+            def __init__(self, *args, **kwargs):
+                raise ImportError("Install fyers-apiv3 to use live FYERS sessions.")
+
+    fyersModel = _MissingFyersModel
 import os
-import pandas as pd
-import requests
 import traceback
 #from utility import *
-import pyotp
+try:
+    import pyotp
+except ImportError:
+    class _MissingPyotp:
+        class TOTP:
+            def __init__(self, *args, **kwargs):
+                raise ImportError("Install pyotp to use FYERS TOTP login flows.")
+
+    pyotp = _MissingPyotp
 from datetime import *
 import calendar
 import webbrowser
-import hashlib
 import time
 from datatypes.defines import *
 from datatypes.trade_data import get_quote_request_data, quote_data
+from broker_platform.fyers.fyers_auth import is_token_expired, refresh_access_token
 import datetime as dt
+import yaml
+from yaml import SafeLoader
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 
 #Define
 FYERS_API_RETRY_COUNT = 5
 FYERS_API_RETRY_TIME = 1
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
+
+
+class fyers_session_model:
+    def __init__(self, config_file):
+
+        #get the config file data
+        self.config_file = config_file
+        with open(self.config_file) as utility_data:
+            self.utility_data = yaml.load(utility_data, Loader=SafeLoader)
+
+        #generate trading session
+        #self.config = config()
+        #self.utility = utitlity()
+        self.logs_path = os.getcwd() + "/Logs/"
+        self.user_name = self.utility_data["user_name"]
+        self.app_id = self.utility_data["client_id"]
+        self.secret_id = self.utility_data["secret_id"]
+        self.pin = str(self.utility_data["pin"])
+        self.totp = self.utility_data["totp"]
+        self.phone_no = self.utility_data["phone_no"]
+
+        totp = pyotp.TOTP(self.totp)
+        print("Use this TOTP for login in Web Browser: ", totp.now())
+
+    def get_tokens(self):
+        try:
+            appSession = fyersModel.SessionModel(client_id=self.app_id,
+                                                  secret_key=self.secret_id,
+                                                  redirect_uri="http://google.com/",
+                                                  response_type="code",
+                                                  grant_type="authorization_code")
+            tokenURL = appSession.generate_authcode()
+            #print("tokenURL: ", tokenURL)
+            # This command is used to open the url in default system brower
+            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            webbrowser.register('chrome', None, webbrowser.BackgroundBrowser(chrome_path))
+            obj_web_browser = webbrowser.get('chrome')
+            obj_web_browser.open_new_tab(tokenURL)
+            authUrl = input('Enter the URL from redirect URL')
+            appSession.set_token(authUrl.split('auth_code=')[1].split('&state')[0])
+            generate_token = appSession.generate_token()
+            self.utility_data['zaccess_token'] = generate_token['access_token']
+            self.utility_data['zrefresh_token'] = generate_token['refresh_token']
+            #print(self.utility_data['zrefresh_token'])
+            with open(self.config_file, 'w') as fp:
+                yaml.dump(self.utility_data, fp)
+        except:
+            traceback.print_exc()
 
 class fyers_utitlity:
     def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token="", access_token=""):
@@ -44,7 +114,7 @@ class fyers_utitlity:
             self.response_type = "code"
             self.state = "sample_state"
             self.refresh_token = refresh_token
-            access_token_expired = self.__is_token_expired(access_token) if access_token else False
+            access_token_expired = is_token_expired(access_token) if access_token else False
             if access_token and not access_token_expired:
                 self.access_token = access_token
             else:
@@ -70,31 +140,17 @@ class fyers_utitlity:
         return self.is_running
 
     def __is_token_expired(self, token):
-        try:
-            payload_part = token.split(".")[1]
-            payload_part += "=" * (-len(payload_part) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(payload_part))
-            expires_at = dt.datetime.fromtimestamp(int(payload["exp"]), dt.timezone.utc)
-            return expires_at <= dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1)
-        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-            return False
+        return is_token_expired(token)
 
     def __get_access_token_by_refresh_token(self):
-        hash_val = hashlib.sha256(f"{self.app_id}:{self.secret_id}".encode())
-        data = {
-            "grant_type": "refresh_token",
-            "appIdHash": hash_val.hexdigest(),
-            "refresh_token": self.refresh_token,
-            "pin": self.pin
-        }
-        response = requests.post('https://api-t1.fyers.in/api/v3/validate-refresh-token', json=data, timeout=15)
-        response = response.json()
-        if response.get('s') == 'ok':
-            self.is_running = True
-            return response['access_token']
-        message = response.get("message", "refresh token validation failed")
-        code = response.get("code", "unknown")
-        raise RuntimeError(f"FYERS refresh-token authentication failed: {code} - {message}")
+        access_token = refresh_access_token(
+            client_id=self.app_id,
+            secret_key=self.secret_id,
+            pin=self.pin,
+            refresh_token=self.refresh_token,
+        )
+        self.is_running = True
+        return access_token
 
     def __getAccessToken(self):
         try:

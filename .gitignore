@@ -2,3 +2,13 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+
+# Local broker credentials and generated token files
+.env
+.env.*
+*.yaml
+*.yml
+credentials*.json
+credentials*.yaml
+credentials*.yml
+*fyers*token*
