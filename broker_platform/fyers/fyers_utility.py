@@ -15,7 +15,7 @@ from selenium.webdriver.common.by import By
 import webbrowser
 import hashlib
 import time
-from ...datatypes.defines import *
+from DataTypes.defines import *
 import datetime as dt
 import yaml
 from yaml import SafeLoader

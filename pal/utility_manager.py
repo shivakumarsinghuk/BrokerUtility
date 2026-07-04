@@ -4,11 +4,19 @@ Zerodha Kite Connect - Historical Data
 
 """
 import os
+<<<<<<< HEAD
 from broker_platform import *
 from ..broker_platform.kite import *
 from ..broker_platform.kite import *
 from ..broker_platform.fyers import *
 from ..broker_platform.zebu import *
+=======
+from DataTypes.login_types import *
+from DataTypes.trade_data import *
+from broker_platform.fyers import *
+from broker_platform.zebu import *
+from broker_platform.kite import *
+>>>>>>> 6b89364 (Add data types submodule)
 
 #defines
 

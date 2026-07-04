@@ -11,13 +11,18 @@ import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 import pandas as pd
+from DataTypes.trade_data import *
 import traceback
 from pyotp import TOTP
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+<<<<<<< HEAD
 from ...datatypes.defines import *
 from ...datatypes.trade_data import *
+=======
+from DataTypes.defines import *
+>>>>>>> 6b89364 (Add data types submodule)
 import datetime as dt
 
 #defines

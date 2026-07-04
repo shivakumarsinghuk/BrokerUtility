@@ -1,19 +1,18 @@
-import datatypes.login_types
+from DataTypes.login_types import *
 from pal.utility_manager import *
-from datatypes.login_types import *
 
 
 obj_utility_manager = utility_manager()
 #For ZEBUMYNT
-'''
-loginData = datatypes.login_types.LogInData(broker="ZEBUMYNT", 
-                                            user_id=<user_id>, 
-                                            password=<password>, 
+
+loginData = LogInData(broker="ZEBUMYNT",
+                                            user_id="ZVK0116",
+                                            password="Zeb#1mar81",
                                             api_key="", 
-                                            api_secret_key=<api_secret_key>, 
-                                            phone_no=<mac address>,
-                                            totp_key=<DOB>)
-'''
+                                            api_secret_key="XugYc8TC2R6N5Z7v56Pd7347zQaRvE73",
+                                            phone_no="1c:91:80:e5:fa:5a",
+                                            totp_key="04041986")
+
 
 #For Fyers
 '''
