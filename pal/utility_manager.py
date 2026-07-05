@@ -4,19 +4,12 @@ Zerodha Kite Connect - Historical Data
 
 """
 import os
-<<<<<<< HEAD
-from broker_platform import *
-from ..broker_platform.kite import *
-from ..broker_platform.kite import *
-from ..broker_platform.fyers import *
-from ..broker_platform.zebu import *
-=======
 from DataTypes.login_types import *
 from DataTypes.trade_data import *
-from broker_platform.fyers import *
-from broker_platform.zebu import *
-from broker_platform.kite import *
->>>>>>> 6b89364 (Add data types submodule)
+from ..broker_platform.fyers import *
+from ..broker_platform.zebu import *
+from ..broker_platform.kite import *
+
 
 #defines
 
@@ -67,7 +60,7 @@ class utility_manager:
                                       "zebumynt":self.get_zebu_utility_object}
         self.dict_utility = {}
 
-    def get_utility_object(self, broker_data):
+    def get_utility_object(self, broker_data:LogInData):
         #check whether dict utility function available
         if broker_data.user_id in self.dict_utility:
             #get the object from dictionary and return

@@ -16,7 +16,7 @@ loginData = LogInData(broker="ZEBUMYNT",
 
 #For Fyers
 '''
-loginData = datatypes.login_types.LogInData(broker="FYERS",
+loginData = DataTypes.login_types.LogInData(broker="FYERS",
                                             user_id=<user_id>,
                                             password=<xxxx - Four digit pin>,
                                             api_key=<api_id>,
@@ -30,7 +30,7 @@ Copy the url from address box and paste in python
 
 #For Zerodha
 '''
-loginData = datatypes.login_types.LogInData(broker="ZERODHA",
+loginData = DataTypes.login_types.LogInData(broker="ZERODHA",
                                             user_id=<user_id>,
                                             password=<password>,
                                             api_key=<api_key>,
