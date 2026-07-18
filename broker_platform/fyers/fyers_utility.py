@@ -142,9 +142,20 @@ class fyers_utitlity:
         except:
             traceback.print_exc()
 
+    def __get_totp(self):
+        totp = pyotp.TOTP(self.totp)
+        # Wait until a fresh OTP window if current one is about to expire
+        remaining = totp.interval - (int(time.time()) % totp.interval)
+
+        if remaining <= 30:
+            print(f"Waiting {remaining + 1} seconds for a fresh OTP...")
+            time.sleep(remaining + 1)
+        return totp.now()
+
     def __get_url_token_manual(self, str_url):
-        print("Token Url: ", str_url)
-        authUrl = input('Open url and get the URL from redirect URL')
+        print("URL: ", str_url)
+        print("Use this Phone Number, TOTP and pin for login in Web Browser: ", self.phone_no,  self.__get_totp(), self.pin)
+        authUrl = input('Open url and get the URL from redirect URL and use above totp for login')
         return authUrl.split('auth_code=')[1].split('&state')[0]
 
     def __get_url_token(self, str_url):
