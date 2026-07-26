@@ -7,6 +7,7 @@ Zerodha Kite Connect - Historical Data
 from myntapi import app
 import logging
 import os
+import calendar
 import datetime as dt
 import pandas as pd
 import traceback
@@ -104,8 +105,16 @@ class zebumynt_utitlity:
             try:
                 if "minute" in interval:
                     i_interval = int(interval.replace("minute", ""))
+                    # get_time_price_series needs epoch-second timestamps, not "YYYY-MM-DD HH:MM:SS"
+                    # strings -- passing date strings makes the API silently return None.
+                    # str_from_date/str_to_date are IST wall-clock times; calendar.timegm() treats
+                    # a naive tuple as UTC, so the IST offset must be subtracted first, regardless
+                    # of the machine's local timezone.
+                    IST_OFFSET = timedelta(hours=5, minutes=30)
+                    epoch_from_date = calendar.timegm((datetime.strptime(str_from_date, "%Y-%m-%d %H:%M:%S") - IST_OFFSET).timetuple())
+                    epoch_to_date = calendar.timegm((datetime.strptime(str_to_date, "%Y-%m-%d %H:%M:%S") - IST_OFFSET).timetuple())
                     response = self.zebumynt.get_time_price_series(exchange=exchange, token = ticker,\
-                                                    starttime=str_from_date, endtime=str_to_date,\
+                                                    starttime=epoch_from_date, endtime=epoch_to_date,\
                                                     interval=int(i_interval))
                     #print("response2", response)
                 else:
@@ -481,7 +490,28 @@ class zebumynt_utitlity:
         l_token = p_strstock
         if p_strstock in self.dict_token:
             l_token = self.dict_token[p_strstock]
+        else:
+            # this Noren-family API needs the numeric scrip token (not the tradingsymbol) for
+            # historical data / quotes on anything beyond the hardcoded indices above -- resolve
+            # it via search_scrip and cache it, same as the preloaded index tokens.
+            resolved_exchange, resolved_token = self.__resolve_token(p_strstock, l_exchange)
+            if resolved_token is not None:
+                l_exchange = resolved_exchange
+                l_token = resolved_token
+                self.dict_token[p_strstock] = resolved_token
         return l_exchange, l_token
+
+    def __resolve_token(self, p_strstock, p_preferred_exchange):
+        for exchange in (p_preferred_exchange, "NSE" if p_preferred_exchange == "NFO" else "NFO"):
+            try:
+                response = self.zebumynt.searchscrip(exchange=exchange, searchtext=p_strstock)
+                for entry in (response or {}).get("values", []):
+                    if entry.get("tsym") == p_strstock:
+                        return entry.get("exch", exchange), entry.get("token")
+            except:
+                print("Exception while resolving token for", p_strstock, "on", exchange)
+                traceback.print_exc()
+        return None, None
 
 
 # Private Function  -Start
@@ -529,12 +559,35 @@ class zebumynt_utitlity:
 
         return obj_quote_data
 
-    def get_option_chain(self):
-        print(self.zebumynt.get_option_chain(exchange="NFO", tradingsymbol="NIFTY10MAR26P24500", strikeprice="24500"))
+    # p_option_type - CE or PE. p_expiry_date format "DD-MON-YYYY" (e.g. "28-JUL-2026"), same as
+    # nse_utitlity.get_index_expiry_date()'s output. Returns p_count candidate contracts centered
+    # on p_strike_price, p_strike_step apart, as (tradingsymbol, strike_price, option_type) tuples.
+    #
+    # Constructs symbols directly via get_option_name() rather than listing them from
+    # search_scrip()/self.zebumynt.get_option_chain() -- neither returns a chain filterable by
+    # strike: the former is an unverified endpoint that returned nothing in testing, and the
+    # latter (searching broadly by symbol name) only returns a small, arbitrarily-truncated slice
+    # of the full chain, observed in testing to be nowhere near the current ATM strike. Since the
+    # naming convention is fixed and index options trade in regular strike steps, constructing
+    # candidates directly and letting get_quotes()/get_updated_exchange_token() resolve (and
+    # silently skip) whichever ones don't exist is far more reliable.
+    def get_option_chain(self, p_symbol, p_strike_price, p_option_type, p_expiry_date, p_count=40, p_strike_step=50):
+        lst_contracts = []
+        half_count = max(p_count // 2, 1)
+        for offset in range(-half_count, half_count + 1):
+            strike = p_strike_price + (offset * p_strike_step)
+            if strike <= 0:
+                continue
+            tsym = self.get_option_name(p_symbol, p_expiry_date, False, str(int(strike)), p_option_type)
+            lst_contracts.append((tsym, float(strike), p_option_type.upper()))
+
+        lst_contracts.sort(key=lambda c: abs(c[1] - p_strike_price))
+        return lst_contracts[:p_count]
 
     def search_scrip(self, searchtext, exchange="NSE"):
         ret = self.zebumynt.searchscrip(exchange=exchange, searchtext=searchtext)
         print(ret)
+        return ret
 
     # --------------PRIVATE METHODS START----------------------------------------
 
