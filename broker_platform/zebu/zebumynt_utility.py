@@ -59,6 +59,9 @@ class zebumynt_utitlity:
         ret = self.zebumynt.login(userid=self.user_name, password=self.pin, twoFA=self.totp, vendor_code=self.user_name,
                                   api_secret=self.secret_id, imei=self.phone_no)
         print("ret: ", ret)
+        if not ret or "susertoken" not in ret:
+            self.is_running = False
+            raise RuntimeError(f"Zebu login failed for user {self.user_name}: {ret}")
         self.susertoken = ret["susertoken"]
         self.is_running = True
 

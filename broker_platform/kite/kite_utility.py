@@ -119,6 +119,11 @@ class kite_utitlity:
             return p_symbol + lst_split_date[2][-2:] + lst_split_date[1][0].upper() + \
                 lst_split_date[0] + p_str_option_price + p_option_type.upper()
 
+    def get_future_name(self, symbol: str, expiry_date: str):
+        # Kite monthly future convention: {SYMBOL}{YY}{MMM}FUT, e.g. NIFTY26AUGFUT.
+        split_data = expiry_date.split("-")
+        return f"{symbol}{split_data[2][-2:]}{split_data[1].upper()}FUT"
+
     #Historical Data - Start
     def fetchCandleMultipleStocks(self, lst_stocks, str_from_date, str_to_date, interval):
         dict_stock_data = {}

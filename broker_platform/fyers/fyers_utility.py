@@ -92,10 +92,17 @@ class fyers_utitlity:
             self.refresh_token = refresh_token
             #self.access_token = self.__get_access_token_by_refresh_token()
             self.access_token = self.__getAccessToken()
+            print("AppID: ", self.app_id, "Access Token: ", self.access_token)
+            # FyersModel opens fyersApi.log/fyersRequests.log under log_path via
+            # logging.FileHandler, which raises FileNotFoundError if the dir doesn't exist yet.
+            os.makedirs(self.logs_path, exist_ok=True)
             self.fyers = fyersModel.FyersModel(client_id=self.app_id, token=self.access_token,log_path=self.logs_path)
+            self.is_running = True
+            print("Fyers utility initialized")
             time.sleep(5)
-        except:
+        except Exception:
             print("Exception in fyers utility constructor")
+            traceback.print_exc()
 
     def get_running_status(self):
         return self.is_running
@@ -236,6 +243,12 @@ class fyers_utitlity:
 
         return (l_str_year + l_str_month + l_str_date)
 
+    def get_future_name(self, symbol: str, expiry_date: str):
+        # Fyers monthly future convention: {SYMBOL}{YY}{MMM}FUT, e.g. NIFTY26AUGFUT.
+        # No exchange prefix here -- fetchOHLC/place_order prepend "{exchange}:" themselves.
+        split_data = expiry_date.split("-")
+        return f"{symbol}{split_data[2][-2:]}{split_data[1].upper()}FUT"
+
     #Historical Data - Start
     def fetchCandleMultipleStocks(self, lst_stocks, str_from_date,
                                   str_to_date, interval, all_data=False,
@@ -264,7 +277,11 @@ class fyers_utitlity:
         ticker = exchange + ":" + ticker
         if ticker == "NIFTY50":
             ticker = "NIFTY"
-        if not market_type == "":
+        if market_type == "FUT":
+            # future symbols (from get_future_name) are already complete Fyers trading
+            # symbols, e.g. NIFTY26AUGFUT -- no suffix needed.
+            pass
+        elif not market_type == "":
             #for options market is not required
             ticker = ticker + "-" + market_type
         else:
@@ -293,6 +310,7 @@ class fyers_utitlity:
 
         retry_number = 1
         data = []
+        response = None
         dict_request = {"symbol": ticker, "resolution": interval, "date_format": "1", "range_from": str_from_date,
                         "range_to": str_to_date, "cont_flag": "1"}
         print(dict_request)
@@ -303,6 +321,9 @@ class fyers_utitlity:
                 historic_data_col = [DATE_TIME, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, CLOSE_PRICE,VOLUME_DATA]
                 if response['s'] == 'ok':
                     data = pd.DataFrame.from_dict(response['candles'])
+                    # F&O candles carry a trailing open-interest field that equity/index candles
+                    # don't -- keep only the columns we actually name.
+                    data = data.iloc[:, :len(historic_data_col)]
                     data.columns = historic_data_col
                     data[DATE_TIME] = pd.to_datetime(data[DATE_TIME],unit = "s")
                     data[DATE_TIME] = data[DATE_TIME].dt.tz_localize('utc').dt.tz_convert('Asia/Kolkata')
