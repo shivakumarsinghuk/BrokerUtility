@@ -75,6 +75,12 @@ class fyers_session_model:
             traceback.print_exc()
 
 class fyers_utitlity:
+    # fetchOHLC/get_quotes append "-{market_type}" to the ticker for any non-"", non-"FUT" value
+    # (see fetchOHLC below) -- option symbols from get_option_name are already complete Fyers
+    # trading symbols, so they need the EMPTY sentinel here (opposite of Zebu/Kite, which need a
+    # non-empty one to avoid their own reparse-as-option logic).
+    OPTION_MARKET_TYPE = ""
+
     def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token=""):
         #generate trading session
         try:
@@ -226,7 +232,10 @@ class fyers_utitlity:
 
 
         if l_str_month.isdigit() == False:
-            l_str_month = str(list(calendar.month_abbr).index(l_str_month))
+            # calendar.month_abbr entries are title-case ("Aug"); callers may pass all-caps
+            # (e.g. datetime.strftime("%d-%b-%Y").upper()), so normalize before the lookup --
+            # otherwise .index() raises ValueError for anything but exact title-case input.
+            l_str_month = str(list(calendar.month_abbr).index(l_str_month.capitalize()))
 
         # if month is less than 10 then remove 0
         if int(l_str_month) < 10:

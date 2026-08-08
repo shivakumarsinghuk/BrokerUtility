@@ -28,6 +28,11 @@ ZEBYMYNT_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
 
 
 class zebumynt_utitlity:
+    # fetchOHLC/get_quotes treat market_type="" as "reparse this symbol as an option via
+    # __get_option_name", which would corrupt an already-resolved option symbol -- any non-empty
+    # sentinel bypasses that and passes the symbol through as-is.
+    OPTION_MARKET_TYPE = "OPT"
+
     def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token=""):
         #refresh token not required, but decleared to have unique method parameters
         # generate trading session

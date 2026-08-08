@@ -48,6 +48,11 @@ def is_monthly_expiry(self, p_str_option_name):
         return True
 
 class kite_utitlity:
+    # get_quote treats market_type="" as "reparse this symbol as an option via
+    # __get_option_name", which would corrupt an already-resolved option symbol -- any non-empty,
+    # non-"EQ" sentinel bypasses that and passes the symbol through as-is.
+    OPTION_MARKET_TYPE = "OPT"
+
     def __init__(self,user_name, client_id, secret_id, pin, totp, phone_no):
         #generate trading session
         try:
