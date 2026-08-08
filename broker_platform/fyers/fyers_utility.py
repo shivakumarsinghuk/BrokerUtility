@@ -16,6 +16,7 @@ import webbrowser
 import hashlib
 import time
 from DataTypes.defines import *
+from DataTypes.trade_data import quote_data
 import datetime as dt
 import yaml
 from yaml import SafeLoader
@@ -355,8 +356,14 @@ class fyers_utitlity:
                     break
                 else:
                     print("Error Response: ", dict_request, response)
-                    time.sleep(2)
                     data = pd.DataFrame()
+                    # code -300 "Invalid symbol provided" is permanent -- the symbol doesn't
+                    # exist (e.g. an expired/delisted weekly option contract), so retrying with
+                    # the same request can never succeed. Stop immediately instead of burning
+                    # through all FYERS_API_RETRY_COUNT retries with a sleep between each.
+                    if isinstance(response, dict) and response.get("code") == -300:
+                        break
+                    time.sleep(2)
 
                 if all_data == False:
                     data = data.loc[data[DATE_TIME] == str_start_date]
@@ -616,7 +623,11 @@ class fyers_utitlity:
                 else:
                     data = data + "," + "NSE:" + q_data.symbol
 
-                if not q_data.market_type == "":
+                # mirror fetchOHLC's market_type handling: "FUT" means the symbol (from
+                # get_future_name) is already a complete Fyers trading symbol on its own --
+                # appending "-FUT" produces an invalid symbol (confirmed in practice: Fyers
+                # rejected "NIFTY26AUGFUT-FUT" with "Please provide a valid symbol").
+                if q_data.market_type not in ("", "FUT"):
                     data = data + "-" + q_data.market_type
 
             dict_request = {
@@ -638,7 +649,8 @@ class fyers_utitlity:
                         time.sleep(FYERS_API_RETRY_TIME)
 
                 except:
-                    print("Exception while getting quotes", response, amo)
+                    print("Exception while getting quotes", response)
+                    traceback.print_exc()
                     retry_number = retry_number + 1
                     time.sleep(FYERS_API_RETRY_TIME)
         return dict_quote_data
