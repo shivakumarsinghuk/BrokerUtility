@@ -638,9 +638,15 @@ class fyers_utitlity:
                     response = self.fyers.quotes(data=dict_request)
                     if response['s'] == 'ok':
                         for item in response['d']:
-                            obj_quote_data = quote_data(item['v']['ask'], item['v']['open_price'], item['v']['high_price'],\
-                                                        item['v']['low_price'], item['v']['prev_close_price'], \
-                                                        item['v']['lp'], item['v']['volume'])
+                            values = item.get('v', {})
+                            obj_quote_data = quote_data(
+                                values.get('ask', values.get('bid', values.get('lp', -1.0))),
+                                values.get('open_price', -1.0),
+                                values.get('high_price', -1.0),
+                                values.get('low_price', -1.0),
+                                values.get('prev_close_price', -1.0),
+                                values.get('lp', -1.0),
+                                values.get('volume', -1.0))
 
                             dict_quote_data[item['n'].replace("NSE:", "")] = obj_quote_data
                         break
