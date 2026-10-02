@@ -15,6 +15,8 @@ from selenium.webdriver.common.by import By
 import webbrowser
 import hashlib
 import time
+import requests
+from requests.adapters import HTTPAdapter
 from DataTypes.defines import *
 from DataTypes.trade_data import quote_data
 import datetime as dt
@@ -26,6 +28,47 @@ import pandas as pd
 FYERS_API_RETRY_COUNT = 5
 FYERS_API_RETRY_TIME = 1
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
+# The static IPv4 whitelisted for this app on myapi.fyers.in. Fyers rejects orders from any other
+# IP ("Algo orders are not allowed from this app", code -50). If set, the machine's public IPv4 is
+# checked against it before each order; leave "" to skip the check.
+FYERS_STATIC_IPV4 = ""
+FYERS_IPV4_CHECK_URL = "https://api.ipify.org"
+
+# Fyers' trading API (orders, positions, funds...). Market data lives under /data instead.
+FYERS_TRADING_API_PREFIX = "https://api-t1.fyers.in/api/v3/"
+# Fyers rejects orders that don't arrive from the whitelisted IP (code -50); retrying can't help.
+FYERS_IP_REJECTED_CODE = -50
+
+
+class _IPv4Adapter(HTTPAdapter):
+    """
+    Connection pool whose sockets are bound to an IPv4 source address, so requests through it
+    always leave over IPv4. On a dual-stack network requests prefers IPv6, and Fyers would see the
+    IPv6 address instead of the whitelisted static IPv4. A pool of its own also matters: the
+    session's existing keep-alive connections to api-t1.fyers.in (opened by history/quote calls,
+    over IPv6) would otherwise be reused for orders.
+    """
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["source_address"] = ("0.0.0.0", 0)
+        super().init_poolmanager(*args, **kwargs)
+
+
+def _check_static_ipv4():
+    # Warns if the public IPv4 isn't the whitelisted one -- the order is still sent, Fyers stays
+    # the authority on whether it's accepted.
+    if not FYERS_STATIC_IPV4:
+        return
+    try:
+        session = requests.Session()
+        session.mount("https://", _IPv4Adapter())
+        public_ip = session.get(FYERS_IPV4_CHECK_URL, timeout=5).text.strip()
+    except Exception:
+        print("Could not determine public IPv4 before placing order")
+        return
+    if public_ip != FYERS_STATIC_IPV4:
+        print("WARNING: public IPv4", public_ip, "is not the whitelisted static IP", FYERS_STATIC_IPV4,
+              "-- Fyers will likely reject this order")
 
 
 class fyers_session_model:
@@ -104,6 +147,8 @@ class fyers_utitlity:
             # logging.FileHandler, which raises FileNotFoundError if the dir doesn't exist yet.
             os.makedirs(self.logs_path, exist_ok=True)
             self.fyers = fyersModel.FyersModel(client_id=self.app_id, token=self.access_token,log_path=self.logs_path)
+            # orders (and the rest of the trading API) over IPv4 only -- see _IPv4Adapter
+            self.fyers.service.session.mount(FYERS_TRADING_API_PREFIX, _IPv4Adapter())
             self.is_running = True
             print("Fyers utility initialized")
             time.sleep(5)
@@ -246,7 +291,8 @@ class fyers_utitlity:
             Months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
             l_str_month = Months[int(l_str_month) - 1]
         else:
-            Months = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "1O", "11", "12"]
+            # Fyers weekly month codes: 1-9 for Jan-Sep, O/N/D for Oct/Nov/Dec
+            Months = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "O", "N", "D"]
             l_str_month = Months[int(l_str_month) - 1]
             l_str_date = lst_split_date[0]
 
@@ -464,11 +510,15 @@ class fyers_utitlity:
         retry_number = 1
         while retry_number <= FYERS_API_RETRY_COUNT:
             try:
+                _check_static_ipv4()
                 response = self.fyers.place_order(dict_request)
                 print("Response: ", response)
-                order_id = response['id']
+                # error responses carry no 'id'
+                order_id = response.get('id', "")
                 print("order_id: ", order_id)
                 if not order_id == "":
+                    break
+                elif response.get('code') == FYERS_IP_REJECTED_CODE:
                     break
                 else:
                     retry_number = retry_number + 1
