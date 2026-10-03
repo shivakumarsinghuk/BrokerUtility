@@ -217,7 +217,6 @@ class fyers_utitlity:
 
     #p_option_type - CE or PE
     def get_option_name(self, p_symbol:str, p_str_date:str, p_is_month_expiry, p_str_option_price, p_option_type:str):
-        print(p_symbol, p_str_date)
         l_str_option_format = self.convert_expiry_date_to_option_format(p_str_date, p_is_month_expiry)
         return p_symbol + l_str_option_format + p_str_option_price + p_option_type
 
@@ -246,7 +245,12 @@ class fyers_utitlity:
             Months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
             l_str_month = Months[int(l_str_month) - 1]
         else:
-            Months = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "1O", "11", "12"]
+            # Fyers weekly-symbol month code is a single character so the symbol stays a fixed
+            # length -- digits for Jan-Sep, then letters for Oct/Nov/Dec (e.g. NIFTY25O0725000CE
+            # for a 7-Oct-2025 weekly). The previous table ("1O"/"11"/"12" for Oct/Nov/Dec) produced
+            # a garbled symbol for every Q4 weekly contract -- confirmed in practice via Fyers
+            # rejecting every strike of a resolved Oct weekly as "Invalid symbol provided".
+            Months = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "O", "N", "D"]
             l_str_month = Months[int(l_str_month) - 1]
             l_str_date = lst_split_date[0]
 
@@ -323,7 +327,6 @@ class fyers_utitlity:
         response = None
         dict_request = {"symbol": ticker, "resolution": interval, "date_format": "1", "range_from": str_from_date,
                         "range_to": str_to_date, "cont_flag": "1"}
-        print(dict_request)
         while retry_number < FYERS_API_RETRY_COUNT:
             try:
                 response = self.fyers.history(dict_request)
