@@ -31,7 +31,7 @@ FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
 # The static IPv4 whitelisted for this app on myapi.fyers.in. Fyers rejects orders from any other
 # IP ("Algo orders are not allowed from this app", code -50). If set, the machine's public IPv4 is
 # checked against it before each order; leave "" to skip the check.
-FYERS_STATIC_IPV4 = ""
+FYERS_STATIC_IPV4 = "106.51.205.25"
 FYERS_IPV4_CHECK_URL = "https://api.ipify.org"
 
 # Fyers' trading API (orders, positions, funds...). Market data lives under /data instead.
