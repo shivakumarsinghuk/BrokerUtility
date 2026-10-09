@@ -409,6 +409,11 @@ class fyers_utitlity:
                     # through all FYERS_API_RETRY_COUNT retries with a sleep between each.
                     if isinstance(response, dict) and response.get("code") == -300:
                         break
+                    # 's': 'no_data' is a valid answer too -- the symbol exists but has no
+                    # candles in this range (e.g. an illiquid deep ITM/OTM strike), so a retry
+                    # would just return the same thing after the sleep.
+                    if isinstance(response, dict) and response.get("s") == "no_data":
+                        break
                     time.sleep(2)
 
                 if all_data == False:
