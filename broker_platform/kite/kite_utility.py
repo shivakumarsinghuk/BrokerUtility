@@ -19,10 +19,13 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from DataTypes.defines import *
 import datetime as dt
+from urllib.parse import urlparse, parse_qs
 
 #defines
 KITE_API_RETRY_COUNT = 3
 KITE_API_RETRY_TIME = 1
+# seconds to wait for Kite to redirect with the request token after the TOTP
+KITE_LOGIN_REDIRECT_WAIT = 30
 
 #Key words
 UM_KW_BROKER = "broker"
@@ -80,6 +83,8 @@ class kite_utitlity:
 
     #session token apis
     def __get_request_token(self):
+        request_token = None
+        driver = None
         try:
             driver = webdriver.Chrome()
             driver.get(self.kite.login_url())
@@ -93,21 +98,42 @@ class kite_utitlity:
             time.sleep(3)
             totp = driver.find_element(By.XPATH, "//input[@placeholder='••••••']")
             totp_token = TOTP(self.totp)
-            print("totp: ", self.totp)
             token = totp_token.now()
             print("totp token: ", token)
             totp.send_keys(token)
-            #driver.find_element(By.XPATH, '/html/body/div[1]/div/div[2]/div[1]/div/div/div[2]/form/div[3]/button').click()
-            print("before sleep")
-            time.sleep(5)
-            print("driver.current_url.split: ", driver.current_url)
-            request_token = driver.current_url.split('request_token=')[1][:32]
-            print("request_token: ", request_token)
-            print("end of request token")
+            # Kite usually auto-submits the 6-digit code; click submit if it is still on the login page
+            time.sleep(2)
+            if "request_token=" not in driver.current_url:
+                driver.implicitly_wait(0)
+                for button in driver.find_elements(By.XPATH, "//button[@type='submit']"):
+                    if button.is_displayed():
+                        button.click()
+                        break
+            # wait for the redirect to the app's redirect url, which carries the request token
+            for _ in range(KITE_LOGIN_REDIRECT_WAIT):
+                if "request_token=" in driver.current_url:
+                    break
+                time.sleep(1)
+            print("driver.current_url: ", driver.current_url)
+            if "request_token=" in driver.current_url:
+                request_token = parse_qs(urlparse(driver.current_url).query)["request_token"][0]
+                print("request_token: ", request_token)
+            else:
+                # still on the login page -- show Kite's message (wrong TOTP, app not authorized, ...)
+                driver.implicitly_wait(0)
+                errors = [e.text for e in driver.find_elements(By.CSS_SELECTOR, ".error, .su-message, .su-alert")
+                          if e.text.strip()]
+                print("Kite login did not redirect, page message:", errors or "(none found)")
+                screenshot = os.path.join(os.getcwd(), "kite_login_failed.png")
+                driver.save_screenshot(screenshot)
+                print("Screenshot saved to:", screenshot)
 
         except:
             print("Exception while getting request token")
             traceback.print_exc()
+        finally:
+            if driver is not None:
+                driver.quit()
 
         return request_token
 
@@ -352,8 +378,8 @@ class kite_utitlity:
                 else:
                     retry_number = retry_number + 1
                     time.sleep(KITE_API_RETRY_TIME)
-            except:
-                print("Exception occurred while placing order", order_id)
+            except Exception as e:
+                print("Exception occurred while placing order", order_id, type(e).__name__, e)
                 #traceback.print_exc()
                 retry_number = retry_number + 1
                 time.sleep(KITE_API_RETRY_TIME)
