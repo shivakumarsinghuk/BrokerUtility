@@ -285,6 +285,11 @@ class zebumynt_utitlity:
                 if response['stat'] == "Ok":
                     order_id = response['norenordno']
                     break
+                # a rejection used to loop here forever (no retry count, no sleep), re-sending the
+                # order as fast as the API answered
+                print("Order rejected: ", response)
+                retry_number = retry_number + 1
+                time.sleep(ZEBYMYNT_API_RETRY_TIME)
             else:
                 print("Response is None - Placing Order")
                 retry_number = retry_number + 1
