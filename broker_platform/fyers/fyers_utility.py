@@ -467,10 +467,11 @@ class fyers_utitlity:
         transaction_type = transaction_type.lower()
 
         #Modify Trading Symbol
-        if not market_type == "":
-            tradingsymbol = exchange + ":" + tradingsymbol + "-" + market_type
-        else:
-            tradingsymbol = exchange + ":" + tradingsymbol
+        exchange_prefix = exchange + ":"
+        if not tradingsymbol.upper().startswith(exchange_prefix.upper()):
+            tradingsymbol = exchange_prefix + tradingsymbol
+        if market_type:
+            tradingsymbol = tradingsymbol + "-" + market_type
 
         #modify transaction type
         if transaction_type == "buy":
