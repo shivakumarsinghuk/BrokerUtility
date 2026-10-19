@@ -20,6 +20,7 @@ from requests.adapters import HTTPAdapter
 from DataTypes.defines import *
 from DataTypes.trade_data import quote_data
 import datetime as dt
+import threading
 import yaml
 from yaml import SafeLoader
 import pandas as pd
@@ -27,6 +28,7 @@ import pandas as pd
 #Define
 FYERS_API_RETRY_COUNT = 5
 FYERS_API_RETRY_TIME = 1
+FYERS_HISTORY_REQUEST_INTERVAL_SECONDS = 1.25
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
 # The static IPv4 whitelisted for this app on myapi.fyers.in. Fyers rejects orders from any other
 # IP ("Algo orders are not allowed from this app", code -50). If set, the machine's public IPv4 is
@@ -38,6 +40,21 @@ FYERS_IPV4_CHECK_URL = "https://api.ipify.org"
 FYERS_TRADING_API_PREFIX = "https://api-t1.fyers.in/api/v3/"
 # Fyers rejects orders that don't arrive from the whitelisted IP (code -50); retrying can't help.
 FYERS_IP_REJECTED_CODE = -50
+
+_fyers_history_rate_lock = threading.Lock()
+_fyers_history_next_request_at = 0.0
+
+
+def _wait_for_fyers_history_slot():
+    """Space history request starts to stay below Fyers Standard's 50/minute limit."""
+    global _fyers_history_next_request_at
+    with _fyers_history_rate_lock:
+        now = time.monotonic()
+        request_at = max(now, _fyers_history_next_request_at)
+        _fyers_history_next_request_at = request_at + FYERS_HISTORY_REQUEST_INTERVAL_SECONDS
+    delay = request_at - now
+    if delay > 0:
+        time.sleep(delay)
 
 
 class _IPv4Adapter(HTTPAdapter):
@@ -372,6 +389,7 @@ class fyers_utitlity:
         print(dict_request)
         while retry_number < FYERS_API_RETRY_COUNT:
             try:
+                _wait_for_fyers_history_slot()
                 response = self.fyers.history(dict_request)
                 #print("Response: ", response)
                 historic_data_col = [DATE_TIME, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, CLOSE_PRICE,VOLUME_DATA]
