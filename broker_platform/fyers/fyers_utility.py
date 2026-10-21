@@ -28,7 +28,7 @@ import pandas as pd
 #Define
 FYERS_API_RETRY_COUNT = 5
 FYERS_API_RETRY_TIME = 1
-FYERS_HISTORY_REQUEST_INTERVAL_SECONDS = 1.25
+FYERS_HISTORY_REQUEST_INTERVAL_SECONDS = 1.75
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
 # The static IPv4 whitelisted for this app on myapi.fyers.in. Fyers rejects orders from any other
 # IP ("Algo orders are not allowed from this app", code -50). If set, the machine's public IPv4 is
