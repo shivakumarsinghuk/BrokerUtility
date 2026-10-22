@@ -20,10 +20,13 @@ from requests.adapters import HTTPAdapter
 from DataTypes.defines import *
 from DataTypes.trade_data import quote_data
 import datetime as dt
+from zoneinfo import ZoneInfo
 import threading
 import yaml
 from yaml import SafeLoader
 import pandas as pd
+
+IST = ZoneInfo("Asia/Kolkata")
 
 #Define
 FYERS_API_RETRY_COUNT = 5
@@ -449,7 +452,7 @@ class fyers_utitlity:
 
     # Historical Data - END
 
-    def getTimeFrame(self, str_start_time="05:30:00", str_stop_time="05:30:00", start_date=dt.date.today(), stop_date=dt.date.today()):
+    def getTimeFrame(self, str_start_time="05:30:00", str_stop_time="05:30:00", start_date=dt.datetime.now(IST).date(), stop_date=dt.datetime.now(IST).date()):
         str_from_date = start_date.strftime("%Y-%m-%d") + " " + str_start_time
         str_to_date = stop_date.strftime("%Y-%m-%d") + " " + str_stop_time
         return str_from_date, str_to_date
@@ -746,6 +749,7 @@ class fyers_utitlity:
             "strikecount": 50,   # strikes above & below ATM
             "greeks": "1"
         }
+        response = None
         while retry_number < FYERS_API_RETRY_COUNT:
             try:
                 response = self.fyers.optionchain(data=dict_request)
@@ -754,14 +758,18 @@ class fyers_utitlity:
                 if response['s'] == 'ok':
                     return pd.DataFrame(response["data"]["optionsChain"]), response["data"]["callOi"], response["data"]["putOi"]
                 else:
+                    message = str(response.get("message", "")) if isinstance(response, dict) else ""
+                    if "limit" in message.lower() and "requests/day" in message.lower():
+                        print("Fyers option-chain request limit reached:", message)
+                        break
                     retry_number = retry_number + 1
                     time.sleep(FYERS_API_RETRY_TIME)
 
-            except:
+            except Exception:
                 print("Exception while getting option chain", response)
                 retry_number = retry_number + 1
                 time.sleep(FYERS_API_RETRY_TIME)
-        return {"optionsChain": []}, 0, 0
+        return pd.DataFrame(), 0, 0
 
     #non trading apis - start
     def convert_to_option_date_format(self, str_date, is_month_expiry):
