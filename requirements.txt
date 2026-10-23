@@ -1,0 +1,8 @@
+fyers-apiv3
+kiteconnect
+myntapi
+pandas
+pyotp
+PyYAML
+requests
+selenium

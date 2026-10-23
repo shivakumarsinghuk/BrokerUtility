@@ -20,13 +20,18 @@ from requests.adapters import HTTPAdapter
 from DataTypes.defines import *
 from DataTypes.trade_data import quote_data
 import datetime as dt
+from zoneinfo import ZoneInfo
+import threading
 import yaml
 from yaml import SafeLoader
 import pandas as pd
 
+IST = ZoneInfo("Asia/Kolkata")
+
 #Define
 FYERS_API_RETRY_COUNT = 5
 FYERS_API_RETRY_TIME = 1
+FYERS_HISTORY_REQUEST_INTERVAL_SECONDS = 1.75
 FYERS_INVALID_SYMBOL_ERROR = 'Please provide a valid symbol'
 # The static IPv4 whitelisted for this app on myapi.fyers.in. Fyers rejects orders from any other
 # IP ("Algo orders are not allowed from this app", code -50). If set, the machine's public IPv4 is
@@ -38,6 +43,21 @@ FYERS_IPV4_CHECK_URL = "https://api.ipify.org"
 FYERS_TRADING_API_PREFIX = "https://api-t1.fyers.in/api/v3/"
 # Fyers rejects orders that don't arrive from the whitelisted IP (code -50); retrying can't help.
 FYERS_IP_REJECTED_CODE = -50
+
+_fyers_history_rate_lock = threading.Lock()
+_fyers_history_next_request_at = 0.0
+
+
+def _wait_for_fyers_history_slot():
+    """Space history request starts to stay below Fyers Standard's 50/minute limit."""
+    global _fyers_history_next_request_at
+    with _fyers_history_rate_lock:
+        now = time.monotonic()
+        request_at = max(now, _fyers_history_next_request_at)
+        _fyers_history_next_request_at = request_at + FYERS_HISTORY_REQUEST_INTERVAL_SECONDS
+    delay = request_at - now
+    if delay > 0:
+        time.sleep(delay)
 
 
 class _IPv4Adapter(HTTPAdapter):
@@ -372,6 +392,7 @@ class fyers_utitlity:
         print(dict_request)
         while retry_number < FYERS_API_RETRY_COUNT:
             try:
+                _wait_for_fyers_history_slot()
                 response = self.fyers.history(dict_request)
                 #print("Response: ", response)
                 historic_data_col = [DATE_TIME, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, CLOSE_PRICE,VOLUME_DATA]
@@ -431,7 +452,7 @@ class fyers_utitlity:
 
     # Historical Data - END
 
-    def getTimeFrame(self, str_start_time="05:30:00", str_stop_time="05:30:00", start_date=dt.date.today(), stop_date=dt.date.today()):
+    def getTimeFrame(self, str_start_time="05:30:00", str_stop_time="05:30:00", start_date=dt.datetime.now(IST).date(), stop_date=dt.datetime.now(IST).date()):
         str_from_date = start_date.strftime("%Y-%m-%d") + " " + str_start_time
         str_to_date = stop_date.strftime("%Y-%m-%d") + " " + str_stop_time
         return str_from_date, str_to_date
@@ -467,10 +488,11 @@ class fyers_utitlity:
         transaction_type = transaction_type.lower()
 
         #Modify Trading Symbol
-        if not market_type == "":
-            tradingsymbol = exchange + ":" + tradingsymbol + "-" + market_type
-        else:
-            tradingsymbol = exchange + ":" + tradingsymbol
+        exchange_prefix = exchange + ":"
+        if not tradingsymbol.upper().startswith(exchange_prefix.upper()):
+            tradingsymbol = exchange_prefix + tradingsymbol
+        if market_type:
+            tradingsymbol = tradingsymbol + "-" + market_type
 
         #modify transaction type
         if transaction_type == "buy":
@@ -727,6 +749,7 @@ class fyers_utitlity:
             "strikecount": 50,   # strikes above & below ATM
             "greeks": "1"
         }
+        response = None
         while retry_number < FYERS_API_RETRY_COUNT:
             try:
                 response = self.fyers.optionchain(data=dict_request)
@@ -735,14 +758,18 @@ class fyers_utitlity:
                 if response['s'] == 'ok':
                     return pd.DataFrame(response["data"]["optionsChain"]), response["data"]["callOi"], response["data"]["putOi"]
                 else:
+                    message = str(response.get("message", "")) if isinstance(response, dict) else ""
+                    if "limit" in message.lower() and "requests/day" in message.lower():
+                        print("Fyers option-chain request limit reached:", message)
+                        break
                     retry_number = retry_number + 1
                     time.sleep(FYERS_API_RETRY_TIME)
 
-            except:
+            except Exception:
                 print("Exception while getting option chain", response)
                 retry_number = retry_number + 1
                 time.sleep(FYERS_API_RETRY_TIME)
-        return {"optionsChain": []}, 0, 0
+        return pd.DataFrame(), 0, 0
 
     #non trading apis - start
     def convert_to_option_date_format(self, str_date, is_month_expiry):

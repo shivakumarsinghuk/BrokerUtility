@@ -19,7 +19,10 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from DataTypes.defines import *
 import datetime as dt
+from zoneinfo import ZoneInfo
 from urllib.parse import urlparse, parse_qs
+
+IST = ZoneInfo("Asia/Kolkata")
 
 #defines
 KITE_API_RETRY_COUNT = 3
@@ -190,7 +193,7 @@ class kite_utitlity:
 
         return data
 
-    def getTimeFrame(self, str_start_time, str_stop_time, date=dt.date.today()):
+    def getTimeFrame(self, str_start_time, str_stop_time, date=dt.datetime.now(IST).date()):
         str_from_date = date.strftime("%Y-%m-%d") + " " + str_start_time
         str_to_date = date.strftime("%Y-%m-%d") + " " + str_stop_time
         return str_from_date, str_to_date

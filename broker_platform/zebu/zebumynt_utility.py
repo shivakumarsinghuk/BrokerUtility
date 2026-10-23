@@ -8,6 +8,7 @@ from myntapi import app
 import logging
 import os
 import datetime as dt
+from zoneinfo import ZoneInfo
 import pandas as pd
 import traceback
 import pyotp
@@ -18,6 +19,8 @@ import time
 from datetime import datetime
 from datetime import timedelta
 import json
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 # Define
@@ -183,14 +186,14 @@ class zebumynt_utitlity:
 
     # Historical Data - END
 
-    def getTimeFrame(self, str_start_time="05:30:00", str_stop_time="05:30:00", date=dt.date.today(), p_no_of_days = 0):
+    def getTimeFrame(self, str_start_time="05:30:00", str_stop_time="05:30:00", date=dt.datetime.now(IST).date(), p_no_of_days = 0):
         str_from_date = date.strftime("%Y-%m-%d") + " " + str_start_time
         str_from_date = datetime.strptime(str_from_date, '%Y-%m-%d %H:%M:%S').strftime('%s')
         str_to_date = date.strftime("%Y-%m-%d") + " " + str_stop_time
         str_to_date = datetime.strptime(str_to_date, '%Y-%m-%d %H:%M:%S').strftime('%s')
         return str_from_date, str_to_date
 
-    def getTimeFrameMultiDays(self, str_start_time="05:30:00", str_stop_time="05:30:00", date=dt.date.today(), p_no_of_days=0, p_end_date=0):
+    def getTimeFrameMultiDays(self, str_start_time="05:30:00", str_stop_time="05:30:00", date=dt.datetime.now(IST).date(), p_no_of_days=0, p_end_date=0):
         start_date = date - timedelta(p_no_of_days)
         print("start_date", start_date)
         str_from_date = start_date.strftime("%Y-%m-%d") + " " + str_start_time
