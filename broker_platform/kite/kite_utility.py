@@ -67,6 +67,7 @@ class kite_utitlity:
             self.secret_key = secret_id
             self.pword = pin
             self.totp = totp
+            self.phone_no = phone_no
 
             #create kite connect object
             self.kite = KiteConnect(api_key=self.api_key)
@@ -85,11 +86,21 @@ class kite_utitlity:
             print("Exception in kite utility constructor")
 
     #session token apis
+    def __get_totp(self):
+        totp = TOTP(self.totp)
+        remaining = totp.interval - (int(time.time()) % totp.interval)
+
+        if remaining <= 30:
+            print(f"Waiting {remaining + 1} seconds for a fresh OTP...")
+            time.sleep(remaining + 1)
+        return totp.now()
+
     def __get_request_token(self, manual_login=False):
         request_token = None
         driver = None
         try:
             if manual_login:
+                print("Use this phone number and TOTP for login:", self.phone_no, self.__get_totp())
                 login_url = self.kite.login_url()
                 print("Open this Kite login URL in your browser:", login_url)
                 redirect_url = input("After login, paste the full redirect URL: ").strip()
