@@ -54,11 +54,12 @@ class utility_object_data:
 #Utility manager class is responsible to manager the utility objects and it provides
 #interfaces to get the utility object
 class utility_manager:
-    def __init__(self):
+    def __init__(self, manual_kite_login=False):
         self.dict_utility_function = {"fyers":self.get_fyers_utility_object,
                                       "zerodha":self.get_kite_utility_object,
                                       "zebumynt":self.get_zebu_utility_object}
         self.dict_utility = {}
+        self.manual_kite_login = manual_kite_login
 
     def get_utility_object(self, broker_data:LogInData):
         #check whether dict utility function available
@@ -89,13 +90,15 @@ class utility_manager:
                                                                     phone_no=phone_no,
                                                                     refresh_token=refresh_token)
 
-    def get_kite_utility_object(self, user_name="", client_id="", secret_id="", pin="", totp="", phone_no="", refresh_token = ""):
+    def get_kite_utility_object(self, user_name="", client_id="", secret_id="", pin="", totp="", phone_no="", refresh_token = "", manual_login=None):
         globals()[f"obj_trade_utility{user_name}"] = kite_utitlity(user_name=user_name,
                                                                    client_id=client_id,
                                                                    secret_id=secret_id,
                                                                    pin=pin,
                                                                    totp=totp,
-                                                                   phone_no=phone_no)
+                                                                   phone_no=phone_no,
+                                                                   manual_login=(self.manual_kite_login if manual_login is None
+                                                                                 else manual_login))
 
     def get_zebu_utility_object(self, user_name="", client_id="", secret_id="", pin="", totp="", phone_no="", refresh_token = ""):
         globals()[f"obj_trade_utility{user_name}"] = zebumynt_utitlity(user_name=user_name,

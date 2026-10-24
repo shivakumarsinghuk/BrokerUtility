@@ -59,7 +59,7 @@ class kite_utitlity:
     # non-"EQ" sentinel bypasses that and passes the symbol through as-is.
     OPTION_MARKET_TYPE = "OPT"
 
-    def __init__(self,user_name, client_id, secret_id, pin, totp, phone_no):
+    def __init__(self,user_name, client_id, secret_id, pin, totp, phone_no, manual_login=False):
         #generate trading session
         try:
             self.user_name = user_name
@@ -72,7 +72,7 @@ class kite_utitlity:
             self.kite = KiteConnect(api_key=self.api_key)
 
             #get the request token
-            self.request_token = self.__get_request_token()
+            self.request_token = self.__get_request_token(manual_login=manual_login)
             data = self.kite.generate_session(self.request_token, api_secret=self.secret_key)
             self.access_token = data["access_token"]
            # self.access_token = self.kite.generate_session(self.request_token, api_secret=self.api_key)["access_token"]
@@ -85,10 +85,19 @@ class kite_utitlity:
             print("Exception in kite utility constructor")
 
     #session token apis
-    def __get_request_token(self):
+    def __get_request_token(self, manual_login=False):
         request_token = None
         driver = None
         try:
+            if manual_login:
+                login_url = self.kite.login_url()
+                print("Open this Kite login URL in your browser:", login_url)
+                redirect_url = input("After login, paste the full redirect URL: ").strip()
+                request_token = parse_qs(urlparse(redirect_url).query).get("request_token", [None])[0]
+                if not request_token:
+                    raise ValueError("The redirect URL does not contain a request_token")
+                return request_token
+
             driver = webdriver.Chrome()
             driver.get(self.kite.login_url())
             driver.implicitly_wait(10)

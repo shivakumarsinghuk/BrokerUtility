@@ -6,7 +6,7 @@
 """
 test_kite_place_order.py
 
-Logs in to Kite (selenium + TOTP, via kite_utitlity) and places one order. The symbol is checked
+Logs in to Kite (Selenium or manual, via kite_utitlity) and places one order. The symbol is checked
 against the Kite instrument list first, so a wrong symbol fails before anything is sent. Without
 --confirm it only logs in and prints what it would send.
 
@@ -35,6 +35,8 @@ if __name__ == "__main__":
     parser.add_argument("--password", type=str)
     parser.add_argument("--totp_key", type=str, help="TOTP base32 secret")
     parser.add_argument("--phone_no", type=str, help="Not used by Kite login")
+    parser.add_argument("--manual-login", action="store_true",
+                        help="Print the Kite login URL and prompt for the redirect URL instead of using Selenium")
     parser.add_argument("--symbol", type=str, default="NIFTY26O1322500PE", help="Kite trading symbol")
     parser.add_argument("--exchange", type=str, default="NFO", choices=["NSE", "NFO", "BSE", "BFO"])
     parser.add_argument("--side", type=str, default="BUY", choices=["BUY", "SELL"])
@@ -67,7 +69,8 @@ if __name__ == "__main__":
                            secret_id=args.api_secret_key,
                            pin=args.password,
                            totp=args.totp_key,
-                           phone_no=args.phone_no)
+                           phone_no=args.phone_no,
+                           manual_login=args.manual_login)
     # the constructor swallows login errors, so check the session was actually created
     if not getattr(broker, "access_token", None):
         raise SystemExit("Kite login failed -- see the output above")
