@@ -3,6 +3,7 @@
 Zerodha Kite Connect - Historical Data
 
 """
+import re
 import time
 
 from kiteconnect import KiteConnect
@@ -82,6 +83,7 @@ class kite_utitlity:
             #get dump of all NSE instruments
             self.instrument_dump = self.kite.instruments("NSE")
             self.instrument_df = pd.DataFrame(self.instrument_dump)
+            self.nfo_instrument_df = None
         except:
             print("Exception in kite utility constructor")
 
@@ -178,6 +180,32 @@ class kite_utitlity:
         split_data = expiry_date.split("-")
         return f"{symbol}{split_data[2][-2:]}{split_data[1].upper()}FUT"
 
+    def get_historical_option_center(self, symbol, expiry, timestamp):
+        """Return the nearest 50-point strike to NIFTY's last closed future candle."""
+        underlying = str(symbol).split(":")[-1].replace("-INDEX", "").strip()
+        underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
+        future_symbol = self.get_future_name(underlying, expiry)
+        trade_date = timestamp.split(" ")[0]
+        candles = self.fetchOHLC(
+            future_symbol,
+            f"{trade_date} 09:15:00",
+            timestamp,
+            interval="minute",
+            all_data=True,
+            exchange="NFO",
+            market_type="FUT",
+        )
+        if candles is None or candles.empty:
+            return None
+
+        candle_times = pd.to_datetime(candles[DATE_TIME]).dt.tz_localize(None)
+        cutoff = pd.Timestamp(timestamp)
+        closed_candles = candles[(candle_times + pd.Timedelta(minutes=1) <= cutoff).values]
+        if closed_candles.empty:
+            return None
+        price = float(closed_candles.iloc[-1][CLOSE_PRICE])
+        return int(round(price / 50.0) * 50)
+
     #Historical Data - Start
     def fetchCandleMultipleStocks(self, lst_stocks, str_from_date, str_to_date, interval):
         dict_stock_data = {}
@@ -187,16 +215,20 @@ class kite_utitlity:
         return dict_stock_data
 
 
-    def fetchOHLC(self, ticker, str_from_date, str_to_date, interval):
+    def fetchOHLC(self, ticker, str_from_date, str_to_date, interval,
+                  all_data=False, exchange="NSE", market_type="EQ"):
         """extracts historical data and outputs in the form of dataframe"""
         if interval == "1minute":
             interval = "minute"
         retry_number = 1
         data = []
+        last_error = None
         while retry_number < KITE_API_RETRY_COUNT:
             try:
                 instrument = self.__instrumentLookup(ticker)
-                kite_data = self.kite.historical_data(instrument,str_from_date, str_to_date,interval)
+                if instrument == -1:
+                    raise LookupError(f"No NSE/NFO instrument token found for {ticker}")
+                kite_data = self.kite.historical_data(instrument, str_from_date, str_to_date, interval)
                 data = pd.DataFrame(kite_data)
                 lst_candle_type = []
                 #add the candle types to list
@@ -207,10 +239,14 @@ class kite_utitlity:
                 data[CANDLE_TYPE] = lst_candle_type
                 retry_number = retry_number + 1
                 break
-            except:
+            except Exception as error:
+                last_error = error
                 retry_number = retry_number + 1
                 time.sleep(KITE_API_RETRY_TIME)
 
+        if last_error is not None and len(data) == 0:
+            print(f"Kite historical candles unavailable for {ticker}: "
+                  f"{type(last_error).__name__}: {last_error}")
         return data
 
     def getTimeFrame(self, str_start_time, str_stop_time, date=dt.datetime.now(IST).date()):
@@ -297,6 +333,106 @@ class kite_utitlity:
         return isTraded
 
     # order info - end
+    def getOptionChain(self, symbol, exchange="NSE"):
+        """Return a Fyers-like option chain DataFrame for the given underlying symbol.
+
+        The calling code expects columns like symbol, option_type, strike_price and ltp,
+        and the same shape used by select_cheapest_in_band() in the strategy modules.
+        """
+        underlying = str(symbol).split(":")[-1].replace("-INDEX", "").strip()
+        underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
+        option_exchange = "NFO" if exchange.upper() in {"NSE", "NFO"} else exchange.upper()
+        rows = []
+
+        try:
+            instruments = self.kite.instruments(option_exchange)
+        except Exception:
+            instruments = []
+
+        contracts = []
+        for instrument in instruments:
+            trading_symbol = str(instrument.get("tradingsymbol", ""))
+            if not trading_symbol:
+                continue
+            instrument_name = str(instrument.get("name", "")).strip()
+            if instrument_name and instrument_name != underlying:
+                continue
+            if not trading_symbol.startswith(underlying):
+                continue
+
+            # ignore futures / index rows; keep only option contracts ending in CE or PE
+            match = re.search(r"(\d+)(CE|PE)$", trading_symbol)
+            if not match:
+                continue
+
+            contracts.append((instrument, trading_symbol, int(match.group(1)), match.group(2)))
+
+        # Kite ltp() accepts exchange-qualified symbols, not instrument tokens.
+        ltp_by_symbol = {}
+        quote_keys = [f"{option_exchange}:{trading_symbol}"
+                      for _, trading_symbol, _, _ in contracts]
+        for start in range(0, len(quote_keys), 500):
+            try:
+                payload = self.kite.ltp(*quote_keys[start:start + 500])
+                if isinstance(payload, dict):
+                    for quote_key, quote in payload.items():
+                        if isinstance(quote, dict) and quote.get("last_price") is not None:
+                            ltp_by_symbol[quote_key] = float(quote["last_price"])
+            except Exception:
+                continue
+
+        for instrument, trading_symbol, strike_price, option_type in contracts:
+            quote_key = f"{option_exchange}:{trading_symbol}"
+            rows.append({
+                "symbol": quote_key,
+                "option_type": option_type,
+                "strike_price": strike_price,
+                "ltp": ltp_by_symbol.get(quote_key, float("nan")),
+                "expiry": instrument.get("expiry"),
+                "tradingsymbol": trading_symbol,
+                "instrument_token": instrument.get("instrument_token"),
+            })
+
+        df = pd.DataFrame(rows)
+        if df.empty:
+            df = pd.DataFrame(columns=["symbol", "option_type", "strike_price", "ltp", "expiry",
+                                       "tradingsymbol", "instrument_token"])
+        return df, 0, 0
+
+    def get_option_contracts(self, symbol, expiry, option_type):
+        """Return listed NFO option symbols and strikes for one expiry and right."""
+        underlying = str(symbol).split(":")[-1].replace("-INDEX", "").strip()
+        underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
+        try:
+            target_expiry = pd.to_datetime(expiry, format="%d-%b-%Y").date()
+            if self.nfo_instrument_df is None:
+                self.nfo_instrument_df = pd.DataFrame(self.kite.instruments("NFO"))
+            instruments = self.nfo_instrument_df
+        except Exception:
+            return []
+
+        contracts = []
+        for _, instrument in instruments.iterrows():
+            trading_symbol = str(instrument.get("tradingsymbol", ""))
+            instrument_name = str(instrument.get("name", "")).strip()
+            match = re.search(r"(\d+)(CE|PE)$", trading_symbol)
+            if ((instrument_name and instrument_name != underlying)
+                    or not trading_symbol.startswith(underlying)
+                    or not match or match.group(2) != option_type):
+                continue
+            try:
+                instrument_expiry = pd.to_datetime(instrument.get("expiry")).date()
+            except (TypeError, ValueError):
+                continue
+            if instrument_expiry != target_expiry:
+                continue
+            contracts.append({
+                "symbol": trading_symbol,
+                "strike_price": int(match.group(1)),
+            })
+
+        return sorted(contracts, key=lambda contract: contract["strike_price"])
+
     def get_quote(self, p_get_quote_req:get_quote_request_data, p_exchange="NSE"):
         retry_number = 0
         response = None
@@ -486,7 +622,14 @@ class kite_utitlity:
         try:
             return self.instrument_df[self.instrument_df.tradingsymbol==symbol].instrument_token.values[0]
         except:
-            return -1
+            try:
+                if self.nfo_instrument_df is None:
+                    self.nfo_instrument_df = pd.DataFrame(self.kite.instruments("NFO"))
+                return self.nfo_instrument_df[
+                    self.nfo_instrument_df.tradingsymbol == symbol
+                ].instrument_token.values[0]
+            except:
+                return -1
 
     def __getCandleType(self, i_open_price, i_close_price):
         candle_type = "notknown"
