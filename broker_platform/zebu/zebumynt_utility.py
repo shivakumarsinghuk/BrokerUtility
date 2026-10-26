@@ -7,6 +7,7 @@ Zerodha Kite Connect - Historical Data
 from myntapi import app
 import logging
 import os
+import re
 import datetime as dt
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -14,6 +15,7 @@ import traceback
 import pyotp
 from DataTypes.defines import *
 from DataTypes.trade_data import *
+from Utility.utility import generate_monthly_expiry_dates, generate_weekly_expiry_dates
 import time
 #import datetime
 from datetime import datetime
@@ -491,12 +493,82 @@ class zebumynt_utitlity:
         return p_symbol + lst_split_date[0] + lst_split_date[1].upper() +\
                lst_split_date[2][-2:] + p_option_type[0].upper() + p_str_option_price
 
+    def get_option_contracts(self, symbol, expiry, option_type):
+        """Return listed Zebu NFO option contracts for one expiry and option right."""
+        underlying = str(symbol).split(":")[-1].replace("-INDEX", "").strip()
+        underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
+        try:
+            expiry_date = datetime.strptime(expiry.upper(), "%d-%b-%Y")
+            expiry_prefix = f"{expiry_date.day:02d}{expiry_date.strftime('%b').upper()}{expiry_date.strftime('%y')}"
+            search = self.zebumynt.searchscrip(exchange="NFO", searchtext=f"{underlying}{expiry_prefix}")
+        except Exception:
+            return []
+
+        contracts = []
+        for instrument in (search or {}).get("values", []):
+            trading_symbol = str(instrument.get("tsym", ""))
+            match = re.match(rf"^{re.escape(underlying)}{re.escape(expiry_prefix)}([CP])(\d+)$", trading_symbol)
+            if not match:
+                continue
+            contract_type = "CE" if match.group(1) == "C" else "PE"
+            if contract_type != option_type:
+                continue
+            token = instrument.get("token")
+            if token is not None:
+                self.dict_token[trading_symbol] = str(token)
+            contracts.append({"symbol": trading_symbol, "strike_price": int(match.group(2))})
+
+        return sorted(contracts, key=lambda contract: contract["strike_price"])
+
+    def getOptionChain(self, symbol, exchange="NSE"):
+        """Return the shared option-chain DataFrame shape for the nearest Zebu expiry."""
+        underlying = str(symbol).split(":")[-1].replace("-INDEX", "").strip()
+        underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
+        today = datetime.now(IST).replace(tzinfo=None)
+        expiry_dates = (generate_weekly_expiry_dates(today, 1) if underlying == "NIFTY"
+                        else generate_monthly_expiry_dates(today, 1))
+        if not expiry_dates:
+            return pd.DataFrame(columns=["symbol", "option_type", "strike_price", "ltp", "expiry",
+                                         "tradingsymbol", "instrument_token"]), 0, 0
+
+        expiry = expiry_dates[0]
+        rows = []
+        for option_type in ("CE", "PE"):
+            contracts = self.get_option_contracts(underlying, expiry, option_type)
+            requests = [get_quote_request_data(p_symbol=contract["symbol"], p_market_type=self.OPTION_MARKET_TYPE)
+                        for contract in contracts]
+            quotes = self.get_quotes(requests)
+            for contract in contracts:
+                quote = quotes.get(contract["symbol"])
+                rows.append({
+                    "symbol": f"NFO:{contract['symbol']}",
+                    "option_type": option_type,
+                    "strike_price": contract["strike_price"],
+                    "ltp": float(quote.ltp) if quote is not None else float("nan"),
+                    "expiry": expiry,
+                    "tradingsymbol": contract["symbol"],
+                    "instrument_token": self.dict_token.get(contract["symbol"]),
+                })
+
+        return pd.DataFrame(rows, columns=["symbol", "option_type", "strike_price", "ltp", "expiry",
+                                           "tradingsymbol", "instrument_token"]), 0, 0
+
     def get_updated_exchange_token(self, p_strstock):
         lst_index = ["NIFTYBANK-INDEX", "NIFTY50-INDEX", "INDIAVIX-INDEX"]
         l_exchange = "NSE" if "EQ" in p_strstock or (p_strstock in lst_index) else "NFO"
         l_token = p_strstock
         if p_strstock in self.dict_token:
             l_token = self.dict_token[p_strstock]
+        elif l_exchange == "NFO":
+            try:
+                search = self.zebumynt.searchscrip(exchange="NFO", searchtext=p_strstock)
+                for instrument in (search or {}).get("values", []):
+                    if instrument.get("tsym") == p_strstock and instrument.get("token") is not None:
+                        l_token = str(instrument["token"])
+                        self.dict_token[p_strstock] = l_token
+                        break
+            except Exception:
+                pass
         return l_exchange, l_token
 
 
