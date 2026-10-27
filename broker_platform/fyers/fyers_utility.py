@@ -5,6 +5,7 @@ Fyers utility
 
 #from fyers_apiv3 import accessToken
 from fyers_apiv3 import fyersModel
+from fyers_apiv3.FyersWebsocket import data_ws
 import traceback
 #from utility import *
 import pyotp
@@ -22,6 +23,7 @@ from DataTypes.trade_data import quote_data
 import datetime as dt
 from zoneinfo import ZoneInfo
 import threading
+import queue
 import yaml
 from yaml import SafeLoader
 import pandas as pd
@@ -46,6 +48,8 @@ FYERS_IP_REJECTED_CODE = -50
 
 _fyers_history_rate_lock = threading.Lock()
 _fyers_history_next_request_at = 0.0
+_fyers_data_websocket_lock = threading.Lock()
+_fyers_data_websocket_instance = None
 
 
 def _wait_for_fyers_history_slot():
@@ -138,6 +142,179 @@ class fyers_session_model:
         except:
             traceback.print_exc()
 
+
+class fyers_data_websocket:
+    """FYERS full-mode SymbolUpdate socket and thread-safe tick store."""
+
+    def __init__(self, client_id, access_token, logs_path):
+        self.client_id = client_id
+        self.access_token = access_token
+        self.logs_path = logs_path
+        self._fyers = None
+        self._ticks = []
+        self._incoming_ticks = queue.SimpleQueue()
+        self._tick_lock = threading.Lock()
+        self._subscription_lock = threading.RLock()
+        self._desired_symbols = set()
+        self._active_symbols = set()
+        self._is_connected = False
+        self._is_started = False
+        self._is_closed = False
+        self._subscription_queue = queue.Queue()
+        self._subscription_thread = threading.Thread(
+            target=self._process_subscription_queue,
+            name="fyers-data-subscriptions",
+            daemon=True,
+        )
+        self._subscription_thread.start()
+
+    def connect(self):
+        with self._subscription_lock:
+            if self._is_started or self._is_closed:
+                return
+            self._is_started = True
+            self._fyers = data_ws.FyersDataSocket(
+                access_token=f"{self.client_id}:{self.access_token}",
+                write_to_file=False,
+                log_path=self.logs_path,
+                litemode=False,
+                reconnect=True,
+                on_message=self._on_message,
+                on_error=self._on_error,
+                on_connect=self._on_connect,
+                on_close=self._on_close,
+                reconnect_retry=5,
+            )
+
+        try:
+            self._fyers.connect()
+        except Exception:
+            print("Exception while connecting Fyers data WebSocket")
+            traceback.print_exc()
+            with self._subscription_lock:
+                self._is_started = False
+
+    def subscribe(self, p_lst_symbols):
+        lst_symbols = [symbol for symbol in p_lst_symbols if symbol]
+        if not lst_symbols:
+            return
+        with self._subscription_lock:
+            if self._is_closed:
+                return
+            self._desired_symbols.update(lst_symbols)
+            is_started = self._is_started
+            is_connected = self._is_connected
+        if not is_started:
+            self.connect()
+        elif is_connected:
+            self._subscription_queue.put("refresh")
+
+    def unsubscribe(self, p_lst_symbols):
+        lst_symbols = [symbol for symbol in p_lst_symbols if symbol]
+        if not lst_symbols:
+            return
+        with self._subscription_lock:
+            self._desired_symbols.difference_update(lst_symbols)
+            is_connected = self._is_connected
+        if is_connected:
+            self._subscription_queue.put("refresh")
+
+    def _on_connect(self):
+        with self._subscription_lock:
+            if self._is_closed:
+                fyers = self._fyers
+                should_close = True
+            else:
+                should_close = False
+                self._is_connected = True
+                # The 3.1.14 SDK clears its channel state before reconnecting;
+                # rebuild it from our desired symbol set after each connect.
+                self._active_symbols.clear()
+                fyers = self._fyers
+        if should_close:
+            if fyers is not None:
+                fyers.close_connection()
+            return
+        print("Fyers data WebSocket connected")
+        if fyers is not None:
+            fyers.keep_running()
+        self._subscription_queue.put("refresh")
+
+    def _on_message(self, message):
+        if not isinstance(message, dict) or "symbol" not in message:
+            return
+        tick = dict(message)
+        tick["received_at"] = datetime.now(IST)
+        self._incoming_ticks.put(tick)
+
+    def _on_error(self, message):
+        print("Fyers data WebSocket error:", message)
+
+    def _on_close(self, message):
+        with self._subscription_lock:
+            self._is_connected = False
+        print("Fyers data WebSocket closed:", message)
+
+    def _process_subscription_queue(self):
+        while True:
+            command = self._subscription_queue.get()
+            if command is None:
+                return
+            with self._subscription_lock:
+                if self._is_closed or not self._is_connected or self._fyers is None:
+                    continue
+                fyers = self._fyers
+                active_symbols = set(self._active_symbols)
+                desired_symbols = set(self._desired_symbols)
+
+            if active_symbols == desired_symbols:
+                continue
+            if active_symbols:
+                fyers.unsubscribe(sorted(active_symbols), data_type="SymbolUpdate")
+            if desired_symbols:
+                fyers.subscribe(sorted(desired_symbols), data_type="SymbolUpdate")
+
+            with self._subscription_lock:
+                if self._is_connected and not self._is_closed:
+                    self._active_symbols = desired_symbols
+
+    def get_tick_data(self):
+        with self._tick_lock:
+            while True:
+                try:
+                    self._ticks.append(self._incoming_ticks.get_nowait())
+                except queue.Empty:
+                    break
+            ticks = [dict(tick) for tick in self._ticks]
+        return pd.DataFrame.from_records(ticks)
+
+    def close(self):
+        with self._subscription_lock:
+            if self._is_closed:
+                return
+            self._is_closed = True
+            self._is_connected = False
+            self._desired_symbols.clear()
+            fyers = self._fyers
+
+        if fyers is not None:
+            try:
+                # In this SDK version close_connection() also stops reconnects
+                # and joins its WebSocket, message, and ping threads.
+                if not fyers.is_connected():
+                    # close_connection() is a no-op before the SDK has a
+                    # socket object; disable a pending auto-reconnect as well.
+                    fyers.restart_flag = False
+                fyers.close_connection()
+            except Exception:
+                print("Exception while closing Fyers data WebSocket")
+                traceback.print_exc()
+
+        self._subscription_queue.put(None)
+        if threading.current_thread() is not self._subscription_thread:
+            self._subscription_thread.join(timeout=5)
+
+
 class fyers_utitlity:
     # fetchOHLC/get_quotes append "-{market_type}" to the ticker for any non-"", non-"FUT" value
     # (see fetchOHLC below) -- option symbols from get_option_name are already complete Fyers
@@ -147,6 +324,7 @@ class fyers_utitlity:
 
     def __init__(self, user_name, client_id, secret_id, pin, totp, phone_no, refresh_token=""):
         #generate trading session
+        self.data_websocket = None
         try:
             self.is_running = False
             self.logs_path = os.getcwd() + "/Logs/"
@@ -178,6 +356,33 @@ class fyers_utitlity:
 
     def get_running_status(self):
         return self.is_running
+
+    def get_data_websocket(self):
+        global _fyers_data_websocket_instance
+        with _fyers_data_websocket_lock:
+            if self.data_websocket is not None and not self.data_websocket._is_closed:
+                return self.data_websocket
+
+            if (_fyers_data_websocket_instance is None
+                    or _fyers_data_websocket_instance._is_closed):
+                _fyers_data_websocket_instance = fyers_data_websocket(
+                    client_id=self.app_id,
+                    access_token=self.access_token,
+                    logs_path=self.logs_path,
+                )
+            elif (_fyers_data_websocket_instance.client_id != self.app_id
+                  or _fyers_data_websocket_instance.access_token != self.access_token):
+                raise RuntimeError("Only one FYERS data WebSocket account is supported per process")
+
+            self.data_websocket = _fyers_data_websocket_instance
+        return self.data_websocket
+
+    @staticmethod
+    def get_data_websocket_symbol(p_symbol, p_market_type):
+        symbol = "NSE:" + p_symbol
+        if p_market_type not in ("", "FUT"):
+            symbol += "-" + p_market_type
+        return symbol
 
     def __get_access_token_by_refresh_token(self):
         hash_val = hashlib.sha256(f"{self.app_id}:{self.secret_id}".encode())
@@ -693,19 +898,10 @@ class fyers_utitlity:
         #minimum one stock should be availaible
 
         if len(p_lst_stocks) > 0:
-            for q_data in p_lst_stocks:
-                #print("quote_data: ", q_data)
-                if data == "":
-                    data = data + "NSE:" + q_data.symbol
-                else:
-                    data = data + "," + "NSE:" + q_data.symbol
-
-                # mirror fetchOHLC's market_type handling: "FUT" means the symbol (from
-                # get_future_name) is already a complete Fyers trading symbol on its own --
-                # appending "-FUT" produces an invalid symbol (confirmed in practice: Fyers
-                # rejected "NIFTY26AUGFUT-FUT" with "Please provide a valid symbol").
-                if q_data.market_type not in ("", "FUT"):
-                    data = data + "-" + q_data.market_type
+            data = ",".join(
+                self.get_data_websocket_symbol(q_data.symbol, q_data.market_type)
+                for q_data in p_lst_stocks
+            )
 
             dict_request = {
                 "symbols": data
