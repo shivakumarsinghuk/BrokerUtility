@@ -480,6 +480,7 @@ class kite_utitlity:
         dict_quote_data = {}
         for get_quote_req_data in p_lst_get_quote_data_req:
             response = self.get_quote(p_exchange=p_exchange, p_get_quote_req=get_quote_req_data)
+            time.sleep(0.2)
             if not response == None:
                 obj_quote_data = self.__extract_quote_data(response)
                 dict_quote_data[get_quote_req_data.symbol] = obj_quote_data
