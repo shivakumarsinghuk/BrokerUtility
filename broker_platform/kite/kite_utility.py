@@ -343,6 +343,7 @@ class kite_utitlity:
         underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
         option_exchange = "NFO" if exchange.upper() in {"NSE", "NFO"} else exchange.upper()
         rows = []
+        today = dt.datetime.now(IST).date()
 
         try:
             instruments = self.kite.instruments(option_exchange)
@@ -365,12 +366,23 @@ class kite_utitlity:
             if not match:
                 continue
 
-            contracts.append((instrument, trading_symbol, int(match.group(1)), match.group(2)))
+            try:
+                expiry = pd.to_datetime(instrument.get("expiry")).date()
+            except (TypeError, ValueError):
+                continue
+            if expiry < today:
+                continue
+
+            contracts.append((instrument, trading_symbol, int(match.group(1)), match.group(2), expiry))
+
+        if contracts:
+            nearest_expiry = min(contract[4] for contract in contracts)
+            contracts = [contract for contract in contracts if contract[4] == nearest_expiry]
 
         # Kite ltp() accepts exchange-qualified symbols, not instrument tokens.
         ltp_by_symbol = {}
         quote_keys = [f"{option_exchange}:{trading_symbol}"
-                      for _, trading_symbol, _, _ in contracts]
+                  for _, trading_symbol, _, _, _ in contracts]
         for start in range(0, len(quote_keys), 500):
             try:
                 payload = self.kite.ltp(*quote_keys[start:start + 500])
@@ -381,14 +393,14 @@ class kite_utitlity:
             except Exception:
                 continue
 
-        for instrument, trading_symbol, strike_price, option_type in contracts:
+        for instrument, trading_symbol, strike_price, option_type, expiry in contracts:
             quote_key = f"{option_exchange}:{trading_symbol}"
             rows.append({
                 "symbol": quote_key,
                 "option_type": option_type,
                 "strike_price": strike_price,
                 "ltp": ltp_by_symbol.get(quote_key, float("nan")),
-                "expiry": instrument.get("expiry"),
+                "expiry": expiry,
                 "tradingsymbol": trading_symbol,
                 "instrument_token": instrument.get("instrument_token"),
             })
@@ -441,6 +453,9 @@ class kite_utitlity:
         if not p_get_quote_req.market_type == "":
             if p_get_quote_req.market_type == "EQ":
                 l_stock = p_get_quote_req.symbol + "-" + p_get_quote_req.market_type
+            elif p_get_quote_req.market_type in ("OPT", "FUT"):
+                if not l_stock.startswith("NFO:"):
+                    l_stock = "NFO:" + l_stock
         else:
             if p_get_quote_req.symbol == "NIFTY":
                 l_stock = "NSE:" + p_get_quote_req.symbol + " 50"
@@ -456,7 +471,8 @@ class kite_utitlity:
                 response = response[l_stock]
                 break
             else:
-                print("Response is none while getting quote", l_stock)
+                response_keys = list(response) if isinstance(response, dict) else type(response).__name__
+                print(f"No quote data for {l_stock}; response keys/type: {response_keys}")
                 retry_number = retry_number + 1
         return response
 
@@ -464,6 +480,7 @@ class kite_utitlity:
         dict_quote_data = {}
         for get_quote_req_data in p_lst_get_quote_data_req:
             response = self.get_quote(p_exchange=p_exchange, p_get_quote_req=get_quote_req_data)
+            time.sleep(0.2)
             if not response == None:
                 obj_quote_data = self.__extract_quote_data(response)
                 dict_quote_data[get_quote_req_data.symbol] = obj_quote_data
