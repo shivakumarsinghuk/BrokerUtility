@@ -144,7 +144,12 @@ class fyers_session_model:
 
 
 class fyers_data_websocket:
-    """FYERS full-mode SymbolUpdate socket and thread-safe tick store."""
+    """FYERS full-mode SymbolUpdate socket with a thread-safe raw-tick store.
+
+    SDK callbacks only copy messages into an in-memory queue. A separate worker
+    applies subscription changes, and ``get_tick_data`` builds the DataFrame on
+    the caller's thread so pandas work never runs in an SDK callback.
+    """
 
     def __init__(self, client_id, access_token, logs_path):
         self.client_id = client_id
@@ -152,8 +157,12 @@ class fyers_data_websocket:
         self.logs_path = logs_path
         self._fyers = None
         self._ticks = []
+        # Callbacks only enqueue a shallow copy; DataFrame creation is deferred
+        # until the consumer asks for a snapshot.
         self._incoming_ticks = queue.SimpleQueue()
         self._tick_lock = threading.Lock()
+        # The desired set survives reconnects; the active set reflects the
+        # current SDK connection and is rebuilt by _on_connect.
         self._subscription_lock = threading.RLock()
         self._desired_symbols = set()
         self._active_symbols = set()
@@ -169,25 +178,33 @@ class fyers_data_websocket:
         self._subscription_thread.start()
 
     def connect(self):
+        """Create and connect the SDK socket once for this wrapper instance."""
         with self._subscription_lock:
             if self._is_started or self._is_closed:
                 return
             self._is_started = True
-            self._fyers = data_ws.FyersDataSocket(
-                access_token=f"{self.client_id}:{self.access_token}",
-                write_to_file=False,
-                log_path=self.logs_path,
-                litemode=False,
-                reconnect=True,
-                on_message=self._on_message,
-                on_error=self._on_error,
-                on_connect=self._on_connect,
-                on_close=self._on_close,
-                reconnect_retry=5,
-            )
+            try:
+                self._fyers = data_ws.FyersDataSocket(
+                    access_token=f"{self.client_id}:{self.access_token}",
+                    write_to_file=False,
+                    log_path=self.logs_path,
+                    litemode=False,
+                    reconnect=True,
+                    on_message=self._on_message,
+                    on_error=self._on_error,
+                    on_connect=self._on_connect,
+                    on_close=self._on_close,
+                    reconnect_retry=5,
+                )
+            except Exception:
+                self._is_started = False
+                print("Exception while creating Fyers data WebSocket")
+                traceback.print_exc()
+                return
+            fyers = self._fyers
 
         try:
-            self._fyers.connect()
+            fyers.connect()
         except Exception:
             print("Exception while connecting Fyers data WebSocket")
             traceback.print_exc()
@@ -195,6 +212,7 @@ class fyers_data_websocket:
                 self._is_started = False
 
     def subscribe(self, p_lst_symbols):
+        """Add symbols to the desired set and connect on the first request."""
         lst_symbols = [symbol for symbol in p_lst_symbols if symbol]
         if not lst_symbols:
             return
@@ -210,6 +228,7 @@ class fyers_data_websocket:
             self._subscription_queue.put("refresh")
 
     def unsubscribe(self, p_lst_symbols):
+        """Remove symbols from the desired set without blocking the caller."""
         lst_symbols = [symbol for symbol in p_lst_symbols if symbol]
         if not lst_symbols:
             return
@@ -241,6 +260,8 @@ class fyers_data_websocket:
         self._subscription_queue.put("refresh")
 
     def _on_message(self, message):
+        # FYERS also sends control messages. Preserve all fields from symbol
+        # updates and add local receipt time without doing pandas work here.
         if not isinstance(message, dict) or "symbol" not in message:
             return
         tick = dict(message)
@@ -269,16 +290,28 @@ class fyers_data_websocket:
 
             if active_symbols == desired_symbols:
                 continue
-            if active_symbols:
-                fyers.unsubscribe(sorted(active_symbols), data_type="SymbolUpdate")
-            if desired_symbols:
-                fyers.subscribe(sorted(desired_symbols), data_type="SymbolUpdate")
+            try:
+                if active_symbols:
+                    fyers.unsubscribe(sorted(active_symbols), data_type="SymbolUpdate")
+                if desired_symbols:
+                    fyers.subscribe(sorted(desired_symbols), data_type="SymbolUpdate")
+            except Exception:
+                # Keep this worker alive if an SDK call fails. The active set
+                # stays unchanged, so a later refresh or reconnect can retry.
+                print("Exception while updating Fyers WebSocket subscriptions")
+                traceback.print_exc()
+                continue
 
             with self._subscription_lock:
                 if self._is_connected and not self._is_closed:
                     self._active_symbols = desired_symbols
 
     def get_tick_data(self):
+        """Return a DataFrame snapshot retaining every received payload field.
+
+        The snapshot contains all ticks received since this socket was created;
+        calling the accessor does not consume or remove previously returned rows.
+        """
         with self._tick_lock:
             while True:
                 try:
@@ -289,6 +322,7 @@ class fyers_data_websocket:
         return pd.DataFrame.from_records(ticks)
 
     def close(self):
+        """Stop SDK reconnects, close the socket, and stop the subscription worker."""
         with self._subscription_lock:
             if self._is_closed:
                 return
