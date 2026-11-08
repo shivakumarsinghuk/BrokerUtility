@@ -478,6 +478,8 @@ class zebumynt_utitlity:
                 obj_order_data.price = response[0]['prc']
                 obj_order_data.quantity = response[0]['qty']
                 obj_order_data.trans_type = response[0]['tsym'].replace("-EQ","")
+                obj_order_data.filled_quantity = int(response[0].get('fillshares') or 0)
+                obj_order_data.average_price = float(response[0].get('avgprc') or 0.0)
                 break
             else:
                 retry_number = retry_number + 1
@@ -642,4 +644,3 @@ class zebumynt_utitlity:
 
 
     # --------------PRIVATE METHODS END----------------------------------------
-

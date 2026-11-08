@@ -811,12 +811,21 @@ class fyers_utitlity:
         # variety = "amo"
         resp_order_id = ""
         retry_number = 1
+        order_type_code = {"LIMIT": 1, "MARKET": 2, "SL-M": 3, "SL": 4}.get(
+            str(order_type or "LIMIT").upper())
+        if order_type_code is None:
+            print("Unsupported order type while modifying order", order_id, order_type)
+            return resp_order_id
         dict_request = {
             "id": order_id,
-            "type": 1,
-            "limitPrice": price,
-            "stopLoss": trigger_price
+            "type": order_type_code,
+            "limitPrice": price or 0,
+            "stopPrice": trigger_price or 0,
         }
+        if quantity is not None:
+            dict_request["qty"] = quantity
+        if validity is not None:
+            dict_request["validity"] = validity
         while retry_number <= FYERS_API_RETRY_COUNT:
             try:
                 response = self.fyers.modify_order(dict_request)
@@ -902,26 +911,27 @@ class fyers_utitlity:
         dict_request = {"id": order_id}
         data = self.fyers.orderbook(dict_request)
 
-        # check whether order id complete or not
-        status = data['orderBook'][0]['status']
-        if status == 2 or status == 4:
+        order = data['orderBook'][0]
+        # Fyers status codes: 2=traded; 4/6/7=pending, open, or trigger-pending.
+        status_code = order['status']
+        if status_code == 2:
             status = DEFINE_TRADE_COMPLETE
-        # check whether order is cancelled or rejected
-        elif status == 6:
+        elif status_code in (4, 6, 7):
             status = DEFINE_TRADE_OPEN
         else:
             status = DEFINE_NOT_TRADED
 
         #check whether it is buy or sell
-        if data['orderBook'][0]['side'] == -1:
+        if order['side'] == -1:
             transaction_type = "sell"
         else:
             transaction_type = "buy"
 
-
-        cls_order_info = order_info(stock=data['orderBook'][0]['ex_sym'],
+        cls_order_info = order_info(stock=order['ex_sym'],
                                     transaction_type=transaction_type,
-                                    price=data['orderBook'][0]['limitPrice'], status=status)
+                                    price=float(order.get('limitPrice') or 0.0), status=status,
+                                    filled_quantity=int(order.get('filledQty') or 0),
+                                    average_price=float(order.get('tradedPrice') or 0.0))
 
         return cls_order_info
 
@@ -1023,4 +1033,3 @@ class fyers_utitlity:
             l_str_date = lst_split_date[2]
 
         return (l_str_year + l_str_month + l_str_date)
-

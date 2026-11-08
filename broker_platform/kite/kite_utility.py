@@ -317,7 +317,11 @@ class kite_utitlity:
 
         cls_order_info = order_info(stock=data["tradingsymbol"].iloc[-1],
                                     transaction_type=data["transaction_type"].iloc[-1],
-                                    price=data["price"].iloc[-1], status=status, variety=data["variety"][0])
+                                    price=data["price"].iloc[-1], status=status, variety=data["variety"][0],
+                                    filled_quantity=int(data["filled_quantity"].iloc[-1]
+                                                        if pd.notna(data["filled_quantity"].iloc[-1]) else 0),
+                                    average_price=float(data["average_price"].iloc[-1]
+                                                        if pd.notna(data["average_price"].iloc[-1]) else 0.0))
         return cls_order_info
 
     def isSymbolTraded(self, order_info, tradingsymbol, product="MIS"):
@@ -365,6 +369,10 @@ class kite_utitlity:
             match = re.search(r"(\d+)(CE|PE)$", trading_symbol)
             if not match:
                 continue
+            try:
+                strike_price = int(float(instrument.get("strike")))
+            except (TypeError, ValueError):
+                continue
 
             try:
                 expiry = pd.to_datetime(instrument.get("expiry")).date()
@@ -373,7 +381,7 @@ class kite_utitlity:
             if expiry < today:
                 continue
 
-            contracts.append((instrument, trading_symbol, int(match.group(1)), match.group(2), expiry))
+            contracts.append((instrument, trading_symbol, strike_price, match.group(2), expiry))
 
         if contracts:
             nearest_expiry = min(contract[4] for contract in contracts)
@@ -438,9 +446,13 @@ class kite_utitlity:
                 continue
             if instrument_expiry != target_expiry:
                 continue
+            try:
+                strike_price = int(float(instrument.get("strike")))
+            except (TypeError, ValueError):
+                continue
             contracts.append({
                 "symbol": trading_symbol,
-                "strike_price": int(match.group(1)),
+                "strike_price": strike_price,
             })
 
         return sorted(contracts, key=lambda contract: contract["strike_price"])
