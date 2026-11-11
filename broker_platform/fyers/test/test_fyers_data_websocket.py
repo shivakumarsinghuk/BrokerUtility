@@ -103,6 +103,26 @@ class FyersDataWebsocketTests(unittest.TestCase):
         self.assertIn("received_at", ticks.columns)
         self.assertIsInstance(ticks.loc[0, "received_at"], pd.Timestamp)
 
+    def test_symbol_filtered_and_latest_tick_snapshots(self):
+        self.websocket._on_message({
+            "symbol": "NSE:SBIN-EQ", "ltp": 100.0, "last_traded_time": 1793072700,
+        })
+        self.websocket._on_message({
+            "symbol": "NSE:INFY-EQ", "ltp": 200.0, "last_traded_time": 1793072701,
+        })
+        self.websocket._on_message({
+            "symbol": "NSE:SBIN-EQ", "ltp": 101.0, "last_traded_time": 1793072702,
+        })
+
+        sbin_ticks = self.websocket.get_tick_data_for_symbols(["NSE:SBIN-EQ"])
+        latest_ticks = self.websocket.get_latest_tick_data(["NSE:SBIN-EQ", "NSE:INFY-EQ"])
+        all_ticks = self.websocket.get_tick_data()
+
+        self.assertEqual(sbin_ticks["symbol"].tolist(), ["NSE:SBIN-EQ", "NSE:SBIN-EQ"])
+        self.assertEqual(sbin_ticks["ltp"].tolist(), [100.0, 101.0])
+        self.assertEqual(latest_ticks["ltp"].tolist(), [101.0, 200.0])
+        self.assertEqual(len(all_ticks), 3)
+
     def test_updates_unsubscribes_and_resubscribes_after_reconnect(self):
         self.websocket.subscribe(["NSE:SBIN-EQ"])
         self._wait_for_subscriptions(1)
@@ -136,6 +156,9 @@ class FyersDataWebsocketTests(unittest.TestCase):
                          "NSE:SBIN-EQ")
         self.assertEqual(fyers_utitlity.get_data_websocket_symbol("NIFTY26AUGFUT", "FUT"),
                          "NSE:NIFTY26AUGFUT")
+        index_request = fyers_utitlity.get_nifty_index_quote_request()
+        self.assertEqual((index_request.symbol, index_request.market_type),
+                         ("NIFTY50-INDEX", ""))
 
     def test_error_and_close_callbacks_update_connection_state(self):
         self.websocket.subscribe(["NSE:SBIN-EQ"])

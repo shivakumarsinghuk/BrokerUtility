@@ -4,9 +4,11 @@ Zerodha Kite Connect - Historical Data
 
 """
 import re
+import threading
 import time
 
 from kiteconnect import KiteConnect
+from requests.exceptions import Timeout
 import logging
 import os
 from selenium import webdriver
@@ -61,6 +63,8 @@ class kite_utitlity:
     OPTION_MARKET_TYPE = "OPT"
 
     def __init__(self,user_name, client_id, secret_id, pin, totp, phone_no, manual_login=False):
+        self._historical_option_center_cache = {}
+        self._historical_option_center_lock = threading.Lock()
         #generate trading session
         try:
             self.user_name = user_name
@@ -181,24 +185,35 @@ class kite_utitlity:
         return f"{symbol}{split_data[2][-2:]}{split_data[1].upper()}FUT"
 
     def get_historical_option_center(self, symbol, expiry, timestamp):
-        """Return the nearest 50-point strike to NIFTY's last closed future candle."""
+        """Return the nearest 50-point strike to the last closed future candle.
+
+        The replay calls this for every main candle. Fetch the future's full-day minute
+        candles once per symbol/date and reuse them for subsequent cutoff lookups.
+        """
         underlying = str(symbol).split(":")[-1].replace("-INDEX", "").strip()
         underlying = {"NIFTY50": "NIFTY", "NIFTYBANK": "BANKNIFTY"}.get(underlying, underlying)
         future_symbol = self.get_future_name(underlying, expiry)
         trade_date = timestamp.split(" ")[0]
-        candles = self.fetchOHLC(
-            future_symbol,
-            f"{trade_date} 09:15:00",
-            timestamp,
-            interval="minute",
-            all_data=True,
-            exchange="NFO",
-            market_type="FUT",
-        )
+        cache_key = (future_symbol, trade_date)
+        with self._historical_option_center_lock:
+            if cache_key not in self._historical_option_center_cache:
+                candles = self.fetchOHLC(
+                    future_symbol,
+                    f"{trade_date} 09:15:00",
+                    f"{trade_date} 15:30:00",
+                    interval="minute",
+                    all_data=True,
+                    exchange="NFO",
+                    market_type="FUT",
+                )
+                if candles is None or candles.empty:
+                    return None
+                self._historical_option_center_cache[cache_key] = (
+                    candles, pd.to_datetime(candles[DATE_TIME]).dt.tz_localize(None))
+            candles, candle_times = self._historical_option_center_cache[cache_key]
         if candles is None or candles.empty:
             return None
 
-        candle_times = pd.to_datetime(candles[DATE_TIME]).dt.tz_localize(None)
         cutoff = pd.Timestamp(timestamp)
         closed_candles = candles[(candle_times + pd.Timedelta(minutes=1) <= cutoff).values]
         if closed_candles.empty:
@@ -477,7 +492,15 @@ class kite_utitlity:
                 l_stock = "NFO:" + self.__get_option_name(p_get_quote_req.symbol)
 
         while retry_number < KITE_API_RETRY_COUNT:
-            response = self.kite.quote(l_stock)
+            try:
+                response = self.kite.quote(l_stock)
+            except Timeout as error:
+                retry_number += 1
+                print(f"Kite quote timed out for {l_stock} "
+                      f"(attempt {retry_number}/{KITE_API_RETRY_COUNT}): {error}")
+                if retry_number < KITE_API_RETRY_COUNT:
+                    time.sleep(KITE_API_RETRY_TIME)
+                continue
             #print("response: ", response)
             if not response == None and l_stock in response:
                 response = response[l_stock]
@@ -487,6 +510,10 @@ class kite_utitlity:
                 print(f"No quote data for {l_stock}; response keys/type: {response_keys}")
                 retry_number = retry_number + 1
         return response
+
+    @staticmethod
+    def get_nifty_index_quote_request():
+        return get_quote_request_data("NIFTY", "")
 
     def get_quotes(self, p_lst_get_quote_data_req, p_exchange="NSE"):
         dict_quote_data = {}

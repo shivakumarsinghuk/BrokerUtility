@@ -19,7 +19,7 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 from DataTypes.defines import *
-from DataTypes.trade_data import quote_data
+from DataTypes.trade_data import get_quote_request_data, quote_data
 import datetime as dt
 from zoneinfo import ZoneInfo
 import threading
@@ -157,6 +157,8 @@ class fyers_data_websocket:
         self.logs_path = logs_path
         self._fyers = None
         self._ticks = []
+        self._ticks_by_symbol = {}
+        self._latest_ticks = {}
         # Callbacks only enqueue a shallow copy; DataFrame creation is deferred
         # until the consumer asks for a snapshot.
         self._incoming_ticks = queue.SimpleQueue()
@@ -312,14 +314,37 @@ class fyers_data_websocket:
         The snapshot contains all ticks received since this socket was created;
         calling the accessor does not consume or remove previously returned rows.
         """
+        return self._get_tick_data()
+
+    def get_tick_data_for_symbols(self, p_symbols):
+        """Return the retained tick history for only the requested feed symbols."""
+        return self._get_tick_data(p_symbols)
+
+    def get_latest_tick_data(self, p_symbols):
+        """Return only the latest retained tick for each requested feed symbol."""
+        return self._get_tick_data(p_symbols, latest_only=True)
+
+    def _get_tick_data(self, p_symbols=None, latest_only=False):
         with self._tick_lock:
             while True:
                 try:
-                    self._ticks.append(self._incoming_ticks.get_nowait())
+                    tick = self._incoming_ticks.get_nowait()
                 except queue.Empty:
                     break
-            ticks = [dict(tick) for tick in self._ticks]
-        return pd.DataFrame.from_records(ticks)
+                self._ticks.append(tick)
+                symbol = str(tick["symbol"])
+                self._ticks_by_symbol.setdefault(symbol, []).append(tick)
+                self._latest_ticks[symbol] = tick
+
+            if p_symbols is None:
+                ticks = self._ticks
+            elif latest_only:
+                ticks = [self._latest_ticks[symbol] for symbol in p_symbols
+                         if symbol in self._latest_ticks]
+            else:
+                ticks = [tick for symbol in p_symbols
+                         for tick in self._ticks_by_symbol.get(symbol, ())]
+            return pd.DataFrame.from_records([dict(tick) for tick in ticks])
 
     def close(self):
         """Stop SDK reconnects, close the socket, and stop the subscription worker."""
@@ -417,6 +442,10 @@ class fyers_utitlity:
         if p_market_type not in ("", "FUT"):
             symbol += "-" + p_market_type
         return symbol
+
+    @staticmethod
+    def get_nifty_index_quote_request():
+        return get_quote_request_data("NIFTY50-INDEX", "")
 
     def __get_access_token_by_refresh_token(self):
         hash_val = hashlib.sha256(f"{self.app_id}:{self.secret_id}".encode())

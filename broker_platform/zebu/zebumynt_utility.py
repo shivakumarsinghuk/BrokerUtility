@@ -417,6 +417,10 @@ class zebumynt_utitlity:
                 retry_number = retry_number + 1
         return response
 
+    @staticmethod
+    def get_nifty_index_quote_request():
+        return get_quote_request_data("NIFTY50-INDEX", "INDEX")
+
     def get_future_name(self, symbol:str, expiry_date:str):
         split_data = expiry_date.split("-")
         return f"{symbol}{split_data[0]}{split_data[1]}{split_data[2][-2:]}F"
