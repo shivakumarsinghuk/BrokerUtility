@@ -559,6 +559,14 @@ class kite_utitlity:
             exchange = "NFO"
             if not tradingsymbol == "NIFTY":
                 tradingsymbol = self.__get_option_name(tradingsymbol)
+        elif market_type.upper() in ("OPT", "FUT"):
+            exchange = "NFO"
+            if ":" in tradingsymbol:
+                symbol_exchange, tradingsymbol = tradingsymbol.split(":", 1)
+                if symbol_exchange.upper() != "NFO":
+                    raise ValueError(
+                        f"Expected an NFO trading symbol for {market_type} order, got "
+                        f"{symbol_exchange}:{tradingsymbol}")
 
         print("Kite Place Order for: ", tradingsymbol, exchange, price, trigger_price, variety)
         # for testing
