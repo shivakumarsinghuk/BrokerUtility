@@ -313,11 +313,9 @@ class kite_utitlity:
         # place the order
         retry_number = 1
         response = self.kite.order_history(order_id)
-        print("Response: ", response)
 
         data = pd.DataFrame(response)
 
-        print("order info data: ", data['variety'][0])
         status = ""
         #check whether order id complete or not
         status = data["status"].iloc[-1]

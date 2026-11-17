@@ -1,7 +1,10 @@
+from contextlib import redirect_stdout
+from io import StringIO
 import unittest
 from unittest.mock import Mock, patch
 
 from BrokerUtility.broker_platform.kite.kite_utility import kite_utitlity
+from DataTypes.trade_data import DEFINE_TRADE_OPEN
 
 
 class KiteOrderSymbolNormalizationTests(unittest.TestCase):
@@ -51,6 +54,36 @@ class KiteOrderSymbolNormalizationTests(unittest.TestCase):
             )
 
         self.broker.kite.place_order.assert_not_called()
+
+    def test_order_status_poll_does_not_print_the_full_history_response(self):
+        self.broker.kite.order_history.return_value = [
+            {
+                "tradingsymbol": "NIFTY26N1725300PE",
+                "transaction_type": "BUY",
+                "price": 112.65,
+                "status": "OPEN PENDING",
+                "variety": "regular",
+                "filled_quantity": 0,
+                "average_price": 0,
+            },
+            {
+                "tradingsymbol": "NIFTY26N1725300PE",
+                "transaction_type": "BUY",
+                "price": 112.65,
+                "status": "TRIGGER PENDING",
+                "variety": "regular",
+                "filled_quantity": 0,
+                "average_price": 0,
+            },
+        ]
+        output = StringIO()
+
+        with redirect_stdout(output):
+            order_info = self.broker.getOrderInfoByOrderId("order-123")
+
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(order_info.stock, "NIFTY26N1725300PE")
+        self.assertEqual(order_info.status, DEFINE_TRADE_OPEN)
 
 
 if __name__ == "__main__":
