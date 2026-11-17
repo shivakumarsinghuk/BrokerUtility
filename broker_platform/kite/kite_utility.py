@@ -545,7 +545,8 @@ class kite_utitlity:
                     sl_price=0.0,
                     profit_price=0.0,
                     trail_price=0.0,
-                    amo="No"):
+                    amo="No",
+                    market_protection=None):
         #change transaction type to lower
         order_id = ""
         transaction_type = transaction_type.lower()
@@ -565,6 +566,9 @@ class kite_utitlity:
                     raise ValueError(
                         f"Expected an NFO trading symbol for {market_type} order, got "
                         f"{symbol_exchange}:{tradingsymbol}")
+
+        if market_protection is None and order_type.upper() == "MARKET":
+            market_protection = -1
 
         print("Kite Place Order for: ", tradingsymbol, exchange, price, trigger_price, variety)
         # for testing
@@ -592,7 +596,8 @@ class kite_utitlity:
                             iceberg_legs=iceberg_legs,
                             iceberg_quantity=iceberg_quantity,
                             auction_number=auction_number,
-                            tag=tag)
+                            tag=tag,
+                            market_protection=market_protection)
                 print("order_id: ", order_id)
                 if not order_id == "":
                     break

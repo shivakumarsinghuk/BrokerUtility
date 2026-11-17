@@ -1,5 +1,5 @@
 fyers-apiv3
-kiteconnect
+kiteconnect>=5.2.2,<6
 myntapi
 pandas
 pyotp

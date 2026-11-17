@@ -27,6 +27,7 @@ class KiteOrderSymbolNormalizationTests(unittest.TestCase):
         kwargs = self.broker.kite.place_order.call_args.kwargs
         self.assertEqual(kwargs["tradingsymbol"], "NIFTY26N1725050PE")
         self.assertEqual(kwargs["exchange"], "NFO")
+        self.assertEqual(kwargs["market_protection"], -1)
 
     @patch("BrokerUtility.broker_platform.kite.kite_utility.KITE_API_RETRY_COUNT", 1)
     def test_bare_future_symbol_uses_nfo_exchange(self):
@@ -41,6 +42,21 @@ class KiteOrderSymbolNormalizationTests(unittest.TestCase):
         kwargs = self.broker.kite.place_order.call_args.kwargs
         self.assertEqual(kwargs["tradingsymbol"], "NIFTY26NOVFUT")
         self.assertEqual(kwargs["exchange"], "NFO")
+        self.assertEqual(kwargs["market_protection"], -1)
+
+    @patch("BrokerUtility.broker_platform.kite.kite_utility.KITE_API_RETRY_COUNT", 1)
+    def test_limit_order_does_not_set_market_protection(self):
+        self.broker.place_order(
+            tradingsymbol="NFO:NIFTY26N1725050PE",
+            transaction_type="BUY",
+            quantity=65,
+            order_type="LIMIT",
+            price=100.0,
+            market_type="OPT",
+        )
+
+        kwargs = self.broker.kite.place_order.call_args.kwargs
+        self.assertIsNone(kwargs["market_protection"])
 
     @patch("BrokerUtility.broker_platform.kite.kite_utility.KITE_API_RETRY_COUNT", 1)
     def test_rejects_non_nfo_qualified_derivative_symbol(self):
