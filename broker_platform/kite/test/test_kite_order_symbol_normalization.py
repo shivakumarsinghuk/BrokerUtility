@@ -59,6 +59,28 @@ class KiteOrderSymbolNormalizationTests(unittest.TestCase):
         self.assertIsNone(kwargs["market_protection"])
 
     @patch("BrokerUtility.broker_platform.kite.kite_utility.KITE_API_RETRY_COUNT", 1)
+    def test_market_order_modification_uses_automatic_market_protection(self):
+        self.broker.getOrderInfoByOrderId = Mock(return_value=Mock(variety="regular"))
+        self.broker.kite.modify_order.return_value = "order-123"
+
+        modified_id = self.broker.modify_order("order-123", order_type="MARKET")
+
+        self.assertEqual(modified_id, "order-123")
+        self.assertEqual(
+            self.broker.kite.modify_order.call_args.kwargs["market_protection"], -1)
+
+    @patch("BrokerUtility.broker_platform.kite.kite_utility.KITE_API_RETRY_COUNT", 1)
+    def test_market_order_modification_preserves_explicit_market_protection(self):
+        self.broker.getOrderInfoByOrderId = Mock(return_value=Mock(variety="regular"))
+        self.broker.kite.modify_order.return_value = "order-123"
+
+        self.broker.modify_order(
+            "order-123", order_type="MARKET", market_protection=2.5)
+
+        self.assertEqual(
+            self.broker.kite.modify_order.call_args.kwargs["market_protection"], 2.5)
+
+    @patch("BrokerUtility.broker_platform.kite.kite_utility.KITE_API_RETRY_COUNT", 1)
     def test_rejects_non_nfo_qualified_derivative_symbol(self):
         with self.assertRaisesRegex(ValueError, "Expected an NFO trading symbol"):
             self.broker.place_order(

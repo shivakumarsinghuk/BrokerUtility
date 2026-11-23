@@ -620,13 +620,16 @@ class kite_utitlity:
                      order_type=None,
                      trigger_price=None,
                      validity=None,
-                     disclosed_quantity=None):
+                     disclosed_quantity=None,
+                     market_protection=None):
 
         retry_number = 1
         resp_order_id = ""
         #for testing
         #variety = "amo"
         order_info_data: order_info = self.getOrderInfoByOrderId(order_id)
+        if market_protection is None and order_type is not None and order_type.upper() == "MARKET":
+            market_protection = -1
         while retry_number <= KITE_API_RETRY_COUNT:
             try:
                 resp_order_id = self.kite.modify_order(
@@ -638,7 +641,8 @@ class kite_utitlity:
                      order_type=order_type,
                      trigger_price=trigger_price,
                      validity=validity,
-                     disclosed_quantity=disclosed_quantity)
+                     disclosed_quantity=disclosed_quantity,
+                     market_protection=market_protection)
 
                 if not resp_order_id == "":
                     break
